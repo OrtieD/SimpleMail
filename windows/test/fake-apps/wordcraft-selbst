@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "wordcraft-selbst $1" >> "/root/w/env/test/fake-apps/log.txt"

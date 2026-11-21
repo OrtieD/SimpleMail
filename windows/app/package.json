@@ -1,0 +1,14 @@
+{
+  "name": "simplemail",
+  "productName": "SimpleMail",
+  "version": "3.2.38",
+  "description": "SimpleMail – schlanker E-Mail-Client",
+  "main": "main.js",
+  "author": "Ortwin",
+  "license": "MIT",
+  "dependencies": {
+    "imapflow": "^2.11.0",
+    "mailparser": "^3.14.2",
+    "nodemailer": "^10.4.0"
+  }
+}

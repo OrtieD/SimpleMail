@@ -1,0 +1,30 @@
+# --- macOS ---
+.DS_Store
+.build/
+build/
+build.log
+diagnose.log
+*.app
+*.icloud
+
+# --- Windows / Electron ---
+node_modules/
+dist/
+windows/test/data-*
+windows/test/shot-*.png
+windows/test/*.log
+windows/test/*bericht*.txt
+windows/test/fake-apps/log.txt
+
+# --- Fertige Programme gehören in GitHub-Releases, nicht ins Repo ---
+*.zip
+*.dmg
+*.exe
+
+# --- Arbeitsordner und Privates ---
+Claude outputs/
+*.p12
+*.pem
+*.key
+google.json
+.env

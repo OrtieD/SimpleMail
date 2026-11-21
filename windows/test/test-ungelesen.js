@@ -1,0 +1,53 @@
+// Prüft gelben Ungelesen-Punkt und Ordner „Ungelesen“
+const { _electron } = require('playwright-core');
+const fs = require('fs'); const path = require('path');
+const APP = path.resolve(__dirname, '../app');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function launch(dir) {
+  const app = await _electron.launch({ executablePath: require('electron'), args: [APP, '--no-sandbox'], env: { ...process.env, SIMPLEMAIL_DATA: dir } });
+  const page = await app.firstWindow();
+  page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
+  await page.waitForLoadState('domcontentloaded'); await sleep(1500);
+  return { app, page };
+}
+const acc = { displayName: 'ortie', email: 'ortie@test.local', username: 'ortie@test.local', imapHost: '127.0.0.1', imapPort: 1143, smtpHost: '127.0.0.1', smtpPort: 2525 };
+let fail = 0; const check = (name, ok) => { console.log(ok ? 'OK  ' : 'FAIL', name); if (!ok) fail++; };
+const rows = (page) => page.$$eval('.row[data-key]', (r) => r.map((x) => (x.querySelector('.from')?.innerText || '') + (x.classList.contains('unread') ? '|U' : '|R')));
+(async () => {
+  const D = path.join(__dirname, 'data-ungelesen');
+  fs.rmSync(D, { recursive: true, force: true });
+  let { app, page } = await launch(D);
+  await page.evaluate(async (a) => { await api.call('accounts:save', a, 'geheim'); }, acc);
+  await app.close();
+  ({ app, page } = await launch(D));
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.row[data-key]', { timeout: 20000 }); await sleep(1500);
+  const dot = await page.$eval('.row.unread .dot', (d) => { const cs = getComputedStyle(d); const r = d.getBoundingClientRect(); return { bg: cs.backgroundColor, w: r.width, h: r.height }; });
+  console.log('Punkt', dot);
+  check('Gelber Punkt bei ungelesener Mail', dot.bg === 'rgb(255, 204, 0)' && dot.w >= 12);
+  check('Kein Punkt bei gelesener Mail', (await page.$$('.row:not(.unread) .dot')).length === 0);
+  await page.screenshot({ path: path.join(__dirname, 'shot-ungelesen-liste.png') });
+  const side = page.locator('.side-item:has(.label:text-is("Ungelesen"))').first();
+  const sideText = await side.innerText();
+  console.log('Seitenleiste:', JSON.stringify(sideText));
+  check('Zähler am Ordner Ungelesen = 1', /Ungelesen\s*1/.test(sideText));
+  await side.click(); await sleep(800);
+  let r = await rows(page); console.log(r);
+  check('Ungelesen listet nur ungelesene Mails', r.length === 1 && r[0].includes('Alice') && r[0].endsWith('|U'));
+  await page.screenshot({ path: path.join(__dirname, 'shot-ungelesen-ordner.png') });
+  await page.click('.row[data-key]'); await sleep(2000);
+  r = await rows(page); console.log(r);
+  check('Geöffnete Mail bleibt stehen (jetzt gelesen)', r.length === 1 && r[0].endsWith('|R'));
+  const smart = page.locator('.side-item:has(.label:text-is("Smart Inbox"))').first();
+  await smart.click(); await sleep(500);
+  await side.click(); await sleep(800);
+  r = await rows(page); console.log(r);
+  check('Nach Verlassen ist Ordner leer', r.length === 0);
+  await page.evaluate(async () => { const m = Object.values(S.inbox)[0].find((x) => x.subject === 'Treffen morgen'); await setRead(m, false); });
+  await smart.click(); await sleep(300);
+  await side.click(); await sleep(800);
+  r = await rows(page); console.log(r);
+  check('Wieder ungelesen → erscheint im Ordner', r.length === 1 && r[0].endsWith('|U'));
+  await app.close();
+  console.log(fail ? `FEHLER: ${fail}` : 'ALLE OK'); process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

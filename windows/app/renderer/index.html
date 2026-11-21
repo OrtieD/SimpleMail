@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http:; font-src 'self' data: https:; media-src https:; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>SimpleMail</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav id="menubar" role="menubar" aria-label="Menüleiste"></nav>
+  <div id="gBanner" class="g-banner hidden" role="alert"></div>
+  <div id="app">
+    <aside id="sidebar"></aside>
+    <div class="splitter" data-split="side" title="Breite ändern (Doppelklick: Standard)"></div>
+    <section id="listPane">
+      <div class="toolbar">
+        <div class="search">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M10 4a6 6 0 1 0 3.9 10.6l4.7 4.7 1.4-1.4-4.7-4.7A6 6 0 0 0 10 4zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+          <input id="search" type="search" placeholder="Suchen (Strg+F) – Enter durchsucht alle Ordner" autocomplete="off">
+        </div>
+        <button class="icon-btn" data-act="toggle-sort" id="sortToggle" title="Sortierung nach Datum umkehren"><svg viewBox="0 0 24 24" class="ico"><path d="M11 4h2v12.2l4.6-4.6 1.4 1.4-7 7-7-7 1.4-1.4 4.6 4.6V4z"/></svg></button>
+        <button class="icon-btn" data-act="toggle-cal" id="calToggle" title="Termine ein-/ausblenden (Strg+Umschalt+K)"><svg viewBox="0 0 24 24" class="ico"><path d="M7 2h2v2h6V2h2v2h3v17H4V4h3V2zM6 9v10h12V9H6zm2 2h3v3H8v-3z"/></svg></button>
+        <button class="icon-btn" data-act="refresh" title="Abrufen (F5)"><svg viewBox="0 0 24 24" class="ico"><path d="M12 5a7 7 0 1 0 6.7 9h-2.1A5 5 0 1 1 12 7c1.4 0 2.6.6 3.5 1.5L13 11h7V4l-2.6 2.6A7 7 0 0 0 12 5z"/></svg></button>
+        <button class="primary" data-act="compose" title="Neue E-Mail (Strg+N)">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M4 17.2V20h2.8l8.3-8.3-2.8-2.8L4 17.2zm13.7-7.5a1 1 0 0 0 0-1.4l-2-2a1 1 0 0 0-1.4 0l-1.5 1.5 2.8 2.8 2.1-.9z"/></svg>
+          Neu
+        </button>
+      </div>
+      <div id="list" tabindex="0"></div>
+      <div id="status"></div>
+    </section>
+    <div class="splitter" data-split="list" title="Breite ändern (Doppelklick: Standard)"></div>
+    <main id="detail"></main>
+    <div class="splitter cal-only" data-split="cal" title="Breite ändern (Doppelklick: Standard)"></div>
+    <aside id="calPane" class="cal-only"></aside>
+  </div>
+  <div id="modal-root"></div>
+  <div id="menu" class="menu hidden"></div>
+  <div id="mbDrop" class="menu mb-drop hidden" role="menu"></div>
+  <div id="mbSub" class="menu mb-drop hidden" role="menu"></div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>
