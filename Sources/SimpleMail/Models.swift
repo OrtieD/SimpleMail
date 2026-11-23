@@ -166,6 +166,14 @@ enum SidebarItem: Hashable {
         return true
     }
 
+    /// 2.46: gefilterte Ansichten des Posteingangs – beim Kontowechsel zurück auf die Smart Inbox
+    var isFilteredInbox: Bool {
+        switch self {
+        case .category, .unread, .flagged: return true
+        default: return false
+        }
+    }
+
     /// Gemeinsame Ordner über alle Konten: Rolle der zugehörigen Kontoordner
     var roleFolder: FolderRole? {
         switch self {

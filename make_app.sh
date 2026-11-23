@@ -27,8 +27,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundleExecutable</key><string>SimpleMail</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>2.43</string>
-    <key>CFBundleVersion</key><string>45</string>
+    <key>CFBundleShortVersionString</key><string>2.46</string>
+    <key>CFBundleVersion</key><string>48</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSContactsUsageDescription</key><string>SimpleMail schlägt beim Schreiben Adressen aus deinen Kontakten vor.</string>

@@ -284,6 +284,8 @@ const findAccount = (id) => S.accounts.find((a) => a.id === id);
 const accountLabel = (id) => { const a = findAccount(id); return a ? (a.displayName || a.email) : ''; };
 /** Posteingänge aller Konten – oder nur des oben ausgewählten Kontos */
 const everyInbox = () => Object.values(S.inbox).flat();
+/** Gefilterte Ansichten des Posteingangs – beim Kontowechsel zurück auf die Smart Inbox (3.2.41) */
+const FILTERED_INBOX_VIEWS = ['category', 'unread', 'flagged'];
 const accountFilter = () => (S.settings.accountFilter && findAccount(S.settings.accountFilter) ? S.settings.accountFilter : null);
 const allInbox = () => {
   const f = accountFilter();
@@ -4091,7 +4093,9 @@ function openSettings({ welcome = false, tab = 'accounts', account = null } = {}
   const ruleSummary = (r) => {
     const acc = S.accounts.find((a) => a.email.toLowerCase() === String(r.accountEmail || '').toLowerCase());
     const t = r.actions && r.actions.moveTo;
-    return `${acc ? acc.email : 'kein Konto'}${t ? ` → ${t}` : ''}`;
+    const f = r.actions && r.actions.forwardTo;
+    const cp = r.actions && r.actions.copyTo ? ` · Kopie → ${r.actions.copyAccount}: ${r.actions.copyTo}` : '';
+    return `${acc ? acc.email : 'kein Konto'}${t ? ` → ${t}` : ''}${cp}${f ? ` · weiterleiten an ${f}` : ''}`;
   };
   const rulesTab = () => {
     const r = curRule();
@@ -4119,8 +4123,14 @@ function openSettings({ welcome = false, tab = 'accounts', account = null } = {}
       </div>
       <h3>Dann</h3>
       <label>Verschieben in</label><select id="ru-move"><option value="">– nicht verschieben –</option></select>
+      <label>Kopie ablegen in</label><div style="display:flex;gap:6px;min-width:0">
+        <select id="ru-copy-acc" style="flex:1;min-width:0"><option value="">– keine Kopie –</option>${S.accounts.map((a) => `<option value="${esc(a.email.toLowerCase())}" ${r.actions && String(r.actions.copyAccount || '').toLowerCase() === a.email.toLowerCase() ? 'selected' : ''}>${esc(a.email)}</option>`).join('')}</select>
+        <select id="ru-copy" style="flex:1;min-width:0" ${r.actions && r.actions.copyAccount ? '' : 'disabled'}><option value="">– Ordner wählen –</option></select></div>
+      <div class="hint-text">Kopie: Die Mail bleibt im Posteingang (bzw. wird wie oben verschoben) und wird zusätzlich in den Ordner eines beliebigen Kontos kopiert – z. B. Mails ans Vorstand-Postfach zusätzlich in einen Ordner deines privaten Kontos.</div>
       <span></span><label class="check"><input type="checkbox" id="ru-read" style="width:auto" ${r.actions && r.actions.markRead ? 'checked' : ''}> Als gelesen markieren</label>
       <span></span><label class="check"><input type="checkbox" id="ru-flag" style="width:auto" ${r.actions && r.actions.flag ? 'checked' : ''}> Markieren (Stern)</label>
+      <label>Weiterleiten an</label><input id="ru-forward" value="${esc((r.actions && r.actions.forwardTo) || '')}" placeholder="z. B. buero@firma.de (mehrere mit Komma) – leer = nicht weiterleiten">
+      <div class="hint-text">Die Mail wird über dieses Konto als „WG:“ weitergeleitet (Original mit allen Anhängen als .eml dabei). Nur bei neu eingehenden Mails; Weiterleitungen werden nie erneut weitergeleitet.</div>
       <div class="hint-text" style="grid-column:1/-1">Mehrere Begriffe in einer Bedingung mit Komma trennen – einer davon muss passen. Regeln gelten für neu eingehende E-Mails im Posteingang. Es greift die erste passende Regel – Reihenfolge mit ↑ ↓ ändern.
         Regeln werden mit „Offline &amp; Sync“ auf deine anderen Geräte übertragen.</div>
       <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center"><button class="btn" data-x="ru-run">Alle Regeln jetzt auf den Posteingang anwenden</button>
@@ -4141,6 +4151,17 @@ function openSettings({ welcome = false, tab = 'accounts', account = null } = {}
       .map((f) => `<option value="${esc(f.path)}" ${f.path === target ? 'selected' : ''}>${'\u00a0\u00a0'.repeat(f.depth || 0)}${esc(f.name)}</option>`).join('');
     const missing = target && !folders.some((f) => f.path === target) ? `<option value="${esc(target)}" selected>${esc(target)} (nicht gefunden)</option>` : '';
     if ($('#ru-move', el) === sel) sel.innerHTML = '<option value="">– nicht verschieben –</option>' + missing + opts;
+    // Ordner für „Kopie ablegen in“ (beliebiges Konto)
+    const csel = $('#ru-copy', el);
+    const cAcc = S.accounts.find((a) => a.email.toLowerCase() === String((r.actions && r.actions.copyAccount) || '').toLowerCase());
+    if (!csel || !cAcc) return;
+    let cf = S.folders[cAcc.id];
+    if (!cf || !cf.length) { try { cf = await api.call('mail:folders', cAcc.id); S.folders[cAcc.id] = cf; } catch { cf = []; } }
+    const ct = r.actions.copyTo || '';
+    const copts = cf.filter((f) => f.selectable)
+      .map((f) => `<option value="${esc(f.path)}" ${f.path === ct ? 'selected' : ''}>${'\u00a0\u00a0'.repeat(f.depth || 0)}${esc(f.name)}</option>`).join('');
+    const cmissing = ct && !cf.some((f) => f.path === ct) ? `<option value="${esc(ct)}" selected>${esc(ct)} (nicht gefunden)</option>` : '';
+    if ($('#ru-copy', el) === csel) csel.innerHTML = '<option value="">– Ordner wählen –</option>' + cmissing + copts;
   };
   const saveRule = () => {
     const r = curRule();
@@ -4159,7 +4180,9 @@ function openSettings({ welcome = false, tab = 'accounts', account = null } = {}
     r.conditions = [...el.querySelectorAll('.rule-cond')].map((row) => ({
       field: $('[data-k="field"]', row).value, op: $('[data-k="op"]', row).value, value: $('[data-k="value"]', row).value,
     }));
-    r.actions = { moveTo: $('#ru-move', el).value, markRead: $('#ru-read', el).checked, flag: $('#ru-flag', el).checked };
+    r.actions = { moveTo: $('#ru-move', el).value, markRead: $('#ru-read', el).checked, flag: $('#ru-flag', el).checked,
+      forwardTo: $('#ru-forward', el).value.trim(),
+      copyAccount: $('#ru-copy-acc', el).value, copyTo: $('#ru-copy-acc', el).value ? $('#ru-copy', el).value : '' };
     const item = el.querySelector(`[data-x="ru-sel"][data-id="${CSS.escape(r.id)}"] .label`);
     if (item) { item.textContent = r.name || '(ohne Name)'; item.style.opacity = r.enabled ? '' : '.5'; }
     saveRule();
@@ -4169,6 +4192,11 @@ function openSettings({ welcome = false, tab = 'accounts', account = null } = {}
     const accountChanged = e.target.id === 'ru-account';
     readRuleForm();
     if (accountChanged) { const r = curRule(); r.actions.moveTo = ''; loadRuleFolders(); }
+    if (e.target.id === 'ru-copy-acc') {
+      const r = curRule(); r.actions.copyTo = '';
+      const cs = $('#ru-copy', el); cs.disabled = !r.actions.copyAccount; cs.innerHTML = '<option value="">– Ordner wählen –</option>';
+      saveRule(); loadRuleFolders();
+    }
   };
   el.addEventListener('input', onRuleEdit);
   el.addEventListener('change', onRuleEdit);
@@ -4630,7 +4658,7 @@ function openSettings({ welcome = false, tab = 'accounts', account = null } = {}
         const first = S.accounts[0];
         const order = liveRules().reduce((mx, r) => Math.max(mx, r.order || 0), 0) + 1;
         const r = { id: uuid(), name: 'Neue Regel', enabled: true, accountEmail: first ? first.email.toLowerCase() : '', match: 'all',
-          conditions: [{ field: 'from', op: 'contains', value: '' }], actions: { moveTo: '', markRead: false, flag: false },
+          conditions: [{ field: 'from', op: 'contains', value: '' }], actions: { moveTo: '', markRead: false, flag: false, forwardTo: '', copyAccount: '', copyTo: '' },
           order, updatedAt: now(), deleted: false };
         S.settings.rules.push(r);
         selRule = r.id;
@@ -4780,6 +4808,9 @@ document.addEventListener('click', (e) => {
       S.settings.accountFilter = id;
       saveSettings({ sync: false });
       if (id && S.view.type === 'folder' && S.view.acc !== id) { S.view = { type: 'smart' }; S.folderMsgs = []; }
+      // 3.2.41: Konto wählen zeigt den ganzen Posteingang – vorher blieb eine gefilterte Ansicht
+      // (z. B. Kategorie „Benachrichtigungen“, Ungelesen, Markiert) stehen, Persönlich-Mails fehlten scheinbar
+      if (FILTERED_INBOX_VIEWS.includes(S.view.type)) S.view = { type: 'smart' };
       if (S.view.type === 'folder' && !id) { /* Ordneransicht bleibt */ }
       S.searchResults = null;
       const sel = findMessage(S.selected);

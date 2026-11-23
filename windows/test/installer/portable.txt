@@ -1,0 +1,8 @@
+SimpleMail – portable Version
+
+Solange diese Datei neben SimpleMail.exe liegt, speichert SimpleMail alle Daten (Konten, Regeln,
+Einstellungen, Offline-Ablage) im Unterordner „Daten“ – nichts in %APPDATA%, kein Startmenü-Eintrag.
+Den ganzen Ordner z. B. auf einen USB-Stick kopieren.
+
+Hinweis: Passwörter sind mit Windows verschlüsselt und gelten nur für das Windows-Benutzerkonto, unter dem
+sie eingegeben wurden. Auf einem anderen PC die Passwörter einmal unter Einstellungen → Konten neu eingeben.

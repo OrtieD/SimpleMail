@@ -1,7 +1,7 @@
 SimpleMail 2.1 für Windows 10/11
 ================================
 
-Installation
+Installation (ab 3.2.40 besser: SimpleMail-Setup-<Version>.exe ausführen – siehe „Neu in 3.2.40“)
 1. ZIP-Datei entpacken, z. B. nach  C:\Programme\SimpleMail  oder  %LOCALAPPDATA%\SimpleMail
    (der Ordner muss dauerhaft bleiben).
 2. SimpleMail.exe starten. Beim ersten Start legt SimpleMail einen Eintrag im Startmenü an –
@@ -26,6 +26,33 @@ Neu in 2.1
 - Synchronisation mit SimpleMail auf dem Mac: Konten (ohne Passwörter), Signaturen, Textbausteine,
   Erinnerungen und Bild-Freigaben – über den versteckten Ordner „SimpleMail-Sync“ im eigenen Postfach.
   Auf allen Geräten unter Einstellungen → Offline & Sync dasselbe Konto wählen.
+
+Neu in 3.2.41
+- Konto oben in der Seitenleiste wählen zeigt jetzt immer den ganzen Posteingang dieses Kontos (Smart Inbox).
+  Vorher blieb eine gefilterte Ansicht wie „Benachrichtigungen“, „Ungelesen“ oder „Markiert“ stehen – dadurch
+  fehlten scheinbar Mails, z. B. die unter „Persönlich“. „Persönlich“ ist nur eine Ansicht, die Mails bleiben im Posteingang.
+
+Neu in 3.2.40
+- Zwei Varianten zum Herunterladen:
+  • SimpleMail-Setup-<Version>.exe – Installer ohne Administratorrechte (nach %LOCALAPPDATA%\Programs\SimpleMail),
+    mit Startmenü- und auf Wunsch Desktop-Verknüpfung, Deinstallation über „Apps & Features“. Updates einfach
+    drüberinstallieren; Konten und Einstellungen (%APPDATA%) bleiben erhalten – auch bei einer Deinstallation.
+  • SimpleMail-Windows-portable.zip – entpacken und SimpleMail.exe starten. Solange portable.txt neben der EXE
+    liegt, stehen alle Daten im Unterordner „Daten“ (z. B. für USB-Stick). Kein Startmenü-Eintrag, keine
+    automatische Anmeldung als Mailprogramm. Passwörter gelten nur für das Windows-Konto, unter dem sie
+    eingegeben wurden. Wer bisher die Zip-Version benutzt hat und seine Daten behalten will: Installer nehmen.
+- Regeln können eine Kopie ablegen: Einstellungen → Regeln → „Kopie ablegen in“ – Konto und Ordner wählen
+  (auch ein anderes Konto). Das Original bleibt im Posteingang bzw. wird wie eingestellt verschoben.
+  Beispiel: Mails an vorstand@… bleiben im Vorstand-Konto und landen zusätzlich im web.de-Ordner „PWFN Fernwärme“.
+  Jede Mail wird nur einmal kopiert (auch wenn Mac und Windows gleichzeitig laufen); „Regeln jetzt anwenden“
+  kopiert auch bereits vorhandene passende Mails. Wird mit dem Mac synchronisiert.
+
+Neu in 3.2.39
+- Regeln können E-Mails weiterleiten: Einstellungen → Regeln → „Weiterleiten an“ (mehrere Adressen mit Komma).
+  Die Mail geht als „WG: …“ über das Konto der Regel hinaus, das Original mit allen Anhängen hängt als .eml an.
+  Gilt nur für neu eingehende Mails. Schutz vor Schleifen: Weiterleitungen von SimpleMail, Mails eigener Konten und
+  Fehlermeldungen (Mailer-Daemon) werden nie weitergeleitet; läuft SimpleMail auf Mac und Windows gleichzeitig,
+  wird trotzdem nur einmal weitergeleitet. Wird mit dem Mac synchronisiert.
 
 Neu in 3.2.38
 - Wichtige Ordner farbig: Rechtsklick auf einen Ordner in der linken Spalte → „Schriftfarbe …“

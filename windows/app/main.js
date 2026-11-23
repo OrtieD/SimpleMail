@@ -767,7 +767,9 @@ async function loadCalendar(url, force) {
 
 // ---------------------------------------------------------------- Regeln (automatisch einsortieren)
 // Regel: { id, name, enabled, accountEmail, match: 'all'|'any', conditions: [{ field, op, value }],
-//          actions: { moveTo, markRead, flag }, updatedAt, deleted }
+//          actions: { moveTo, markRead, flag, forwardTo }, updatedAt, deleted }
+// copyAccount + copyTo (3.2.40): Kopie in einen Ordner eines beliebigen Kontos ablegen, Original bleibt liegen.
+// forwardTo (3.2.39): Adressen mit Komma/Semikolon getrennt – die Mail wird über das SMTP des Kontos weitergeleitet.
 // Es greift jeweils die erste passende Regel (Reihenfolge wie in den Einstellungen).
 
 const RULE_TEXT = {
@@ -878,8 +880,152 @@ async function ensureJunk(s, c) {
   throw new Error(`Spam-Ordner konnte nicht angelegt werden: ${lastErr ? lastErr.message : ''}`);
 }
 
+// ---------------------------------------------------------------- Regel-Aktion „Weiterleiten“ (3.2.39, gleich wie Mac 2.44)
+// Schleifenschutz: eigene Weiterleitungen tragen X-SimpleMail-Forwarded und werden nie erneut weitergeleitet;
+// keine Weiterleitung von Mails eigener Konten, Zieladressen oder Mailer-Daemons; eigene Adresse ist kein Ziel.
+// Doppelt-Schutz (Mac + Windows gleichzeitig): IMAP-Schlüsselwort $SMForwarded am Original + lokale Liste.
+// „Regeln jetzt anwenden“ leitet nie weiter (sonst gingen hunderte alte Mails raus).
+const FORWARD_KEYWORD = '$SMForwarded';
+const FORWARD_HEADER = 'X-SimpleMail-Forwarded';
+const FORWARD_MAX_PER_RUN = 20;
+
+function forwardTargets(value) {
+  return String(value || '').split(/[,;]/).map((x) => x.trim())
+    .map((x) => { const a = addressparser(x)[0]; return a && a.address ? a.address.toLowerCase() : ''; })
+    .filter((a) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a))
+    .filter((a, i, arr) => arr.indexOf(a) === i);
+}
+
+function forwardedIds() { return readJSON('forwarded.json', []); }
+function rememberForwarded(id) {
+  if (!id) return;
+  const list = forwardedIds().filter((x) => x !== id);
+  list.push(id);
+  writeJSON('forwarded.json', list.slice(-2000));
+}
+
+/** Darf diese Mail weitergeleitet werden? Liefert die verbleibenden Ziele (leer = nein) */
+function forwardPlan(m, targets, acc) {
+  const own = accounts.map((a) => a.email.toLowerCase());
+  const from = String(m.fromAddress || '').toLowerCase();
+  if (!from || own.includes(from) || targets.includes(from)) return [];
+  if (/^(mailer-daemon|postmaster)@/i.test(from)) return [];
+  if (m.messageId && forwardedIds().includes(m.messageId)) return [];
+  return targets.filter((t) => t !== acc.email.toLowerCase());
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const germanDate = (d) => { const x = new Date(d); return isNaN(x) ? '' : `${pad2(x.getDate())}.${pad2(x.getMonth() + 1)}.${x.getFullYear()}, ${pad2(x.getHours())}:${pad2(x.getMinutes())}`; };
+
+/** Weiterleitung bauen: Kopfblock + Originaltext, dazu das Original vollständig als .eml (mit allen Anhängen) */
+async function buildForward(acc, source, targets, ruleId) {
+  const p = await simpleParser(source, { skipTextToHtml: true });
+  const addr = (x) => (x && x.text) || '';
+  const subject = p.subject || '';
+  const head = [
+    '---------- Weitergeleitete Nachricht ----------',
+    `Von: ${addr(p.from)}`,
+    `Datum: ${germanDate(p.date)}`,
+    `Betreff: ${subject}`,
+    `An: ${addr(p.to)}`,
+    ...(p.cc ? [`Kopie: ${addr(p.cc)}`] : []),
+  ];
+  const text = `${head.join('\n')}\n\n${p.text || ''}`;
+  const html = p.html
+    ? '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>'
+      + `<div style="font-family:'Segoe UI',Arial,sans-serif;font-size:14px;color:#444">${head.map(escHtml).join('<br>')}</div><br>`
+      + `<div>${String(p.html).replace(/<script[\s\S]*?<\/script>/gi, '')}</div></body></html>`
+    : undefined;
+  const node = new MailComposer({
+    from: acc.displayName ? { name: acc.displayName, address: acc.email } : acc.email,
+    to: targets.join(', '),
+    subject: /^(wg|fwd?|aw):/i.test(subject) ? subject : `WG: ${subject}`,
+    text, html,
+    attachments: [{ filename: 'Originalnachricht.eml', content: source, contentType: 'message/rfc822', contentDisposition: 'attachment' }],
+    headers: { 'User-Agent': 'SimpleMail/3.2 (Windows)', [FORWARD_HEADER]: ruleId || '1', 'Auto-Submitted': 'auto-generated' },
+  }).compile();
+  return { raw: await node.build(), envelope: node.getEnvelope() };
+}
+
+/** Holt Originale (noch im Posteingang, vor dem Verschieben) und setzt das Schlüsselwort; Versand danach */
+async function collectForwards(c, acc, jobs) {
+  const out = [];
+  for (const j of jobs.slice(0, FORWARD_MAX_PER_RUN)) {
+    try {
+      const m = await c.fetchOne(String(j.uid), { source: true, flags: true }, { uid: true });
+      if (!m || !m.source) continue;
+      if (m.flags && m.flags.has(FORWARD_KEYWORD)) continue;   // anderes Gerät war schneller
+      const head = m.source.toString('binary').split(/\r?\n\r?\n/)[0];
+      if (new RegExp(`^${FORWARD_HEADER}:`, 'im').test(head)) continue;   // eigene Weiterleitung → nie erneut
+      try { await c.messageFlagsAdd(String(j.uid), [FORWARD_KEYWORD], { uid: true }); } catch { /* Server ohne Schlüsselwörter: lokale Liste genügt */ }
+      rememberForwarded(j.messageId);
+      out.push({ ...j, source: m.source });
+    } catch (e) { console.error('Weiterleiten (Original holen):', e.message); }
+  }
+  if (jobs.length > FORWARD_MAX_PER_RUN) send('app-error', `Regel „Weiterleiten“: nur ${FORWARD_MAX_PER_RUN} von ${jobs.length} Mails auf einmal weitergeleitet.`);
+  return out;
+}
+
+async function sendForwards(acc, list) {
+  for (const j of list) {
+    try {
+      const { raw, envelope } = await buildForward(acc, j.source, j.targets, j.ruleId);
+      await deliver(acc, raw, envelope);
+    } catch (e) {
+      console.error('Weiterleiten:', e.message);
+      send('app-error', `Regel: Weiterleiten an ${j.targets.join(', ')} fehlgeschlagen – ${e.message}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- Regel-Aktion „Kopie ablegen in“ (3.2.40, gleich wie Mac 2.45)
+// Kopiert die Mail (per APPEND) in einen Ordner eines beliebigen Kontos – das Original bleibt, wo es ist.
+// Doppelt-Schutz: IMAP-Schlüsselwort $SMCopied am Original + lokale Liste (Mac + Windows → nur eine Kopie).
+const COPY_KEYWORD = '$SMCopied';
+const COPY_MAX_PER_RUN = 500;
+function copiedIds() { return readJSON('copied.json', []); }
+function rememberCopied(id) {
+  if (!id) return;
+  const list = copiedIds().filter((x) => x !== id);
+  list.push(id);
+  writeJSON('copied.json', list.slice(-5000));
+}
+
+async function collectCopies(c, jobs) {
+  const out = [];
+  const done = new Set(copiedIds());
+  for (const j of jobs.slice(0, COPY_MAX_PER_RUN)) {
+    if (j.messageId && done.has(j.messageId)) continue;
+    try {
+      const m = await c.fetchOne(String(j.uid), { source: true, flags: true }, { uid: true });
+      if (!m || !m.source) continue;
+      if (m.flags && m.flags.has(COPY_KEYWORD)) continue;   // schon kopiert (auch vom anderen Gerät)
+      try { await c.messageFlagsAdd(String(j.uid), [COPY_KEYWORD], { uid: true }); } catch { /* lokale Liste genügt */ }
+      rememberCopied(j.messageId);
+      out.push({ ...j, source: m.source });
+    } catch (e) { console.error('Kopie (Original holen):', e.message); }
+  }
+  return out;
+}
+
+async function storeCopies(list) {
+  for (const j of list) {
+    try {
+      const s = sessionFor(j.accountId);
+      await s.run(async (c) => {
+        if (!s.folders.length) await s.loadFolderList(c);
+        await c.append(j.path, j.source, j.seen ? ['\\Seen'] : []);
+      });
+      send('folders-changed', j.accountId);
+    } catch (e) {
+      console.error('Kopie:', e.message);
+      send('app-error', `Regel: Kopie nach „${j.path}“ (${j.email}) fehlgeschlagen – ${e.message}`);
+    }
+  }
+}
+
 /** Wendet die Regeln an; liefert die UIDs der verschobenen E-Mails */
-async function applyRules(c, accountId, folder, messages) {
+async function applyRules(c, accountId, folder, messages, opts = {}) {
   const moved = new Set();
   if (!messages.length) return moved;
   // Gesperrte Absender → Spam-Ordner
@@ -918,17 +1064,46 @@ async function applyRules(c, accountId, folder, messages) {
   const groups = new Map();   // Zielordner → UIDs
   const seen = [];
   const flagged = [];
+  const forwards = [];
+  const copies = [];
+  const acc = accounts.find((a) => a.id === accountId);
   for (const m of messages) {
     const rule = rules.find((r) => ruleMatches(r, m));
     if (!rule) continue;
     moved.hits = (moved.hits || 0) + 1;
     const act = rule.actions || {};
+    if (act.copyTo && act.copyAccount) {
+      const target = accounts.find((a) => a.email.toLowerCase() === String(act.copyAccount).toLowerCase());
+      if (!target) send('app-error', `Regel „${rule.name || ''}“: Konto ${act.copyAccount} für die Kopie fehlt.`);
+      else if (!(target.id === accountId && act.copyTo === folder)) {
+        copies.push({ uid: m.uid, messageId: m.messageId, accountId: target.id, email: target.email, path: act.copyTo, seen: m.isRead || !!act.markRead });
+      }
+    }
+    if (act.forwardTo && acc) {
+      if (opts.manual) moved.forwardSkipped = (moved.forwardSkipped || 0) + 1;
+      else {
+        const targets = forwardPlan(m, forwardTargets(act.forwardTo), acc);
+        if (targets.length) forwards.push({ uid: m.uid, messageId: m.messageId, targets, ruleId: rule.id });
+      }
+    }
     if (act.markRead && !m.isRead) { seen.push(m.uid); m.isRead = true; }
     if (act.flag && !m.isFlagged) { flagged.push(m.uid); m.isFlagged = true; }
     if (act.moveTo && act.moveTo !== folder) {
       if (!groups.has(act.moveTo)) groups.set(act.moveTo, []);
       groups.get(act.moveTo).push(m.uid);
     }
+  }
+  // Kopie ablegen: Original holen, solange es noch im Posteingang liegt; Ablage erst nach Freigabe der Verbindung
+  if (copies.length) {
+    const list = await collectCopies(c, copies);
+    moved.copied = list.length;
+    if (list.length) setTimeout(() => { storeCopies(list); }, 0);
+  }
+  // Weiterleiten: Original holen, solange es noch im Posteingang liegt; Versand erst nach Freigabe der Verbindung
+  if (forwards.length) {
+    const list = await collectForwards(c, acc, forwards);
+    moved.forwarded = list.length;
+    if (list.length) setTimeout(() => { sendForwards(acc, list); }, 0);
   }
   if (seen.length) await c.messageFlagsAdd(seen.join(','), ['\\Seen'], { uid: true });
   if (flagged.length) await c.messageFlagsAdd(flagged.join(','), ['\\Flagged'], { uid: true });
@@ -2252,8 +2427,10 @@ function registerIPC() {
         if (!exists) return 0;
         const list = [];
         for await (const m of c.fetch(`${Math.max(1, exists - 1999)}:${exists}`, FETCH_QUERY)) list.push(convertMessage(m, acc.id, 'INBOX'));
-        const moved = await applyRules(c, acc.id, 'INBOX', list);
-        report.push(`${acc.email}: ${list.length} Mails im Posteingang geprüft, ${moved.hits || 0} passend${moved.spam ? `, ${moved.spam} als Spam aussortiert` : ''}`);
+        const moved = await applyRules(c, acc.id, 'INBOX', list, { manual: true });
+        report.push(`${acc.email}: ${list.length} Mails im Posteingang geprüft, ${moved.hits || 0} passend${moved.spam ? `, ${moved.spam} als Spam aussortiert` : ''}`
+          + (moved.copied ? `, ${moved.copied} kopiert` : '')
+          + (moved.forwardSkipped ? ` (Weiterleiten gilt nur für neu eingehende Mails – ${moved.forwardSkipped} nicht weitergeleitet)` : ''));
         return (moved.hits || 0) + (moved.spam || 0);
       });
     }
@@ -2694,7 +2871,7 @@ function registerIPC() {
 
   // Eigene (größere) Menüleiste im Fenster: Aufbau liefern, Klicks ausführen
   handle('menu:get', () => serializeMenu(Menu.getApplicationMenu()));
-  handle('app:version', () => app.getVersion());
+  handle('app:version', () => app.getVersion() + (PORTABLE ? ' (portabel)' : ''));
   handle('menu:invoke', (pathIdx) => {
     let items = Menu.getApplicationMenu() ? Menu.getApplicationMenu().items : [];
     let item = null;
@@ -2977,17 +3154,29 @@ let pendingMailto = null;   // beim Kaltstart: bis die Oberfläche bereit ist
 // Klassische, immer sichtbare Scrollleisten statt der ausblendenden Windows-11-Variante
 app.commandLine.appendSwitch('disable-features', 'FluentOverlayScrollbar,OverlayScrollbar');
 
+// Portable Version (3.2.40): Datei „portable.txt“ neben SimpleMail.exe → alle Daten im Unterordner „Daten“,
+// kein Startmenü-Eintrag, keine automatische Anmeldung als Mailprogramm (nur per Button in den Einstellungen).
+const EXE_DIR = process.env.SIMPLEMAIL_EXE_DIR || path.dirname(process.execPath);
+const PORTABLE = (process.platform === 'win32' && app.isPackaged) || process.env.SIMPLEMAIL_EXE_DIR
+  ? fs.existsSync(path.join(EXE_DIR, 'portable.txt')) : false;
+if (PORTABLE) {
+  const d = path.join(EXE_DIR, 'Daten');
+  try { fs.mkdirSync(d, { recursive: true }); } catch { /* evtl. schreibgeschützt */ }
+  app.setPath('userData', d);
+}
+
 // Für Tests: eigener Datenordner
 if (process.env.SIMPLEMAIL_DATA) app.setPath('userData', process.env.SIMPLEMAIL_DATA);
 
 /** Windows: Startmenü-Eintrag anlegen – nötig für Mitteilungen und praktisch zum Starten */
 function ensureStartMenuShortcut() {
-  if (process.platform !== 'win32' || !app.isPackaged) return;
+  if (process.platform !== 'win32' || !app.isPackaged || PORTABLE) return;
   try {
     const lnk = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'SimpleMail.lnk');
     let current = null;
     try { current = shell.readShortcutLink(lnk); } catch { /* noch nicht vorhanden */ }
-    if (!current || current.target !== process.execPath) {
+    // Installer legt die Verknüpfung ohne App-ID an → ergänzen (sonst keine Mitteilungen)
+    if (!current || current.target !== process.execPath || current.appUserModelId !== 'de.simplemail.windows') {
       shell.writeShortcutLink(lnk, current ? 'replace' : 'create', {
         target: process.execPath,
         appUserModelId: 'de.simplemail.windows',
@@ -3015,7 +3204,7 @@ if (!gotLock) {
     setInterval(() => cleanTemp(24 * 3600e3), 3600e3).unref();
     app.setAppUserModelId('de.simplemail.windows');
     ensureStartMenuShortcut();
-    registerMailHandler(false).catch(() => {});   // Pfad nach Austausch des Ordners aktualisieren
+    if (!PORTABLE) registerMailHandler(false).catch(() => {});   // Pfad nach Austausch des Ordners aktualisieren
     Menu.setApplicationMenu(buildMenu());
     accounts = readJSON('accounts.json', []);
     outbox = readJSON('outbox.json', []);

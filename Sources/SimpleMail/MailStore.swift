@@ -418,6 +418,9 @@ final class MailStore: ObservableObject {
 
     private func accountFilterChanged() {
         if let f = activeFilter, case .folder(let a, _) = sidebar, a != f { sidebar = .smart }
+        // 2.46: Konto wählen zeigt den ganzen Posteingang – vorher blieb eine gefilterte Ansicht
+        // (Kategorie, Ungelesen, Markiert) stehen, Persönlich-Mails des Kontos fehlten scheinbar
+        if let item = sidebar, item.isFilteredInbox { sidebar = .smart }
         if searchResults != nil { searchResults = nil }
         if let f = activeFilter, let sel = selectedID, sel.account != f { selectedID = nil }
     }
@@ -2158,7 +2161,8 @@ final class MailStore: ObservableObject {
         }
     }
 
-    private func deliver(_ data: Data, to recipients: [String], account acc: Account) async throws {
+    /// Auch für Regel-Weiterleitungen (Rules.swift)
+    func deliver(_ data: Data, to recipients: [String], account acc: Account) async throws {
         guard let pw = Keychain.get(acc.keychainKey) else { throw MailError.noAccount }
         let messageID = SendLog.messageID(data)
         let reply: String
