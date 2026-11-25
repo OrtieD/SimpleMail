@@ -492,10 +492,10 @@ struct PrivacySettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Externe Bilder") {
-                Toggle("Externe Bilder in HTML-Mails blockieren",
+            Section("Datenschutz") {
+                Toggle("Externe Inhalte in HTML-Mails blockieren (empfohlen)",
                        isOn: Binding(get: { store.blockRemoteImages }, set: { store.setBlockImages($0) }))
-                Text("Verhindert Tracking-Pixel: Absender erfahren sonst, wann und wo du ihre Mail geöffnet hast. Eingebettete Bilder werden weiterhin angezeigt.")
+                Text("Bilder, Schriften und Stile von fremden Servern werden erst nach „Bilder laden“ oder für vertraute Absender geladen. Immer aktiv: Zählpixel und bekannte Tracking-Dienste werden entfernt, Bilder ohne Cookies, Referrer und Programmkennung geladen, Tracking-Parameter (utm_* usw.) beim Öffnen von Links gelöscht.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

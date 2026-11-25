@@ -1,2 +1,2 @@
 #!/bin/sh
-echo "word $1" >> "/root/w/env/test/fake-apps/log.txt"
+echo "word $1" >> "/home/user/w/winapp-test/fake-apps/log.txt"

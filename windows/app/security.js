@@ -230,4 +230,50 @@ function normalizeAddress(address) {
   return a.endsWith('@googlemail.com') ? `${a.slice(0, -'googlemail.com'.length)}gmail.com` : a;
 }
 
-module.exports = { authFailed, normalizeAddress, analyze, isBlocked, baseDomain, domainOf, spamScore, isSpam, SPAM_LEVELS };
+
+// =================================================================== Tracking-Schutz
+// Bekannte Dienste für Öffnungs-Tracking in Mails. Die Mac-Version (Privacy.swift) nutzt dieselben Listen.
+const TRACKER_HOSTS = [
+  'list-manage.com', 'mandrillapp.com', 'mcsv.net', 'sendgrid.net', 'mailgun.org', 'hubspotemail.net', 'hubspotlinks.com',
+  'hs-analytics.net', 'track.hubspot.com', 'awstrack.me', 'mjt.lu', 'sendibt2.com', 'sendibt3.com', 'sendibw.com',
+  'klclick.com', 'klclick1.com', 'cmail19.com', 'cmail20.com', 'rs6.net', 'exct.net', 'customeriomail.com',
+  'track.customer.io', 'pstmrk.it', 'via.intercom.io', 'mailtrack.io', 't.yesware.com', 'mailfoogae.appspot.com',
+  'getnotify.com', 'bananatag.com', 'track.mixmax.com', 'r.superhuman.com', 'sidekickopen01.com', 'acemlna.com',
+  'acemlnb.com', 'acemlnc.com', 'acemlnd.com', 'crsend.com', 'mlsend.com', 'zcsend.net', 'dripemail2.com',
+  'doubleclick.net', 'google-analytics.com', 'googletagmanager.com', 'pixel.wp.com', 'mathtag.com', 'emltrk.com',
+  'returnpath.net', 'nl-tracking.com', 'pippio.com', 'liadm.com', 'mi-msg.com', 'eccmp.com', 'emailopen.net',
+];
+// Typische Pfade von Öffnungs-Pixeln
+const TRACKER_PATH = /(\/track(ing)?\/(open|o)\b|\/open\.(php|aspx|gif|jsp)|\/wf\/open|\/e\/o\/|\/oo\/|\/o\.gif|\/on\.jsp|\/trk\/|\/pixel(\.gif|\.png|\/|\?|$)|\/beacon\b|\/openrate|\/imp\?|\/t\.gif|\/tr\?|\/mpss\/o\/|\/ss\/o\/)/i;
+
+function hostOf(url) {
+  try { return new URL(String(url).startsWith('//') ? `https:${url}` : String(url)).hostname.toLowerCase(); } catch { return ''; }
+}
+/** Liegt die Adresse auf einer bekannten Tracking-Domain oder hat sie einen typischen Pixel-Pfad? */
+function isTrackerUrl(url) {
+  const host = hostOf(url);
+  if (!host) return false;
+  if (TRACKER_HOSTS.some((d) => host === d || host.endsWith(`.${d}`))) return true;
+  let p = '';
+  try { const u = new URL(String(url).startsWith('//') ? `https:${url}` : String(url)); p = u.pathname + u.search; } catch { return false; }
+  return TRACKER_PATH.test(p);
+}
+
+// Tracking-Parameter, die beim Öffnen eines Links entfernt werden (wie Apples Link-Tracking-Schutz)
+const TRACKING_PARAMS = new Set(['fbclid', 'gclid', 'gclsrc', 'dclid', 'gbraid', 'wbraid', 'msclkid', 'yclid', 'twclid', 'ttclid', 'li_fat_id',
+  'mc_cid', 'mc_eid', '_hsenc', '_hsmi', '__hssc', '__hstc', '__hsfp', 'hsctatracking', 'mkt_tok', 'oly_anon_id', 'oly_enc_id',
+  'vero_conv', 'vero_id', 'wickedid', 'igshid', '_ke', 'ck_subscriber_id', 'ml_subscriber', 'ml_subscriber_hash', 'sc_cid', 's_cid',
+  'ecid', 'ncid', 'trk_contact', 'trk_msg', 'trk_module', 'trk_sid', 'sfmc_id', 'sfmc_activityid', 'et_rid', 'et_cid', 'cmpid', 'mbid']);
+/** Link ohne Tracking-Parameter (utm_* und bekannte Kennungen); andere Parameter bleiben unverändert */
+function cleanLinkUrl(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return String(url); }
+  if (!/^https?:$/.test(u.protocol)) return String(url);
+  const keys = [...u.searchParams.keys()];
+  const drop = keys.filter((k) => /^utm_/i.test(k) || TRACKING_PARAMS.has(k.toLowerCase()));
+  if (!drop.length) return String(url);
+  for (const k of drop) u.searchParams.delete(k);
+  return u.toString();
+}
+
+module.exports = { isTrackerUrl, cleanLinkUrl, TRACKER_HOSTS, TRACKER_PATH, authFailed, normalizeAddress, analyze, isBlocked, baseDomain, domainOf, spamScore, isSpam, SPAM_LEVELS };

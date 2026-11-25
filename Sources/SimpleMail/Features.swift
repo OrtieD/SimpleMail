@@ -304,7 +304,7 @@ enum Formatters {
 
 enum HTMLTools {
     private static let remotePattern =
-        #"(?i)((src|srcset|background)\s*=\s*["']?\s*(https?:)?//|url\(\s*["']?\s*(https?:)?//)"#
+        #"(?i)((src|srcset|background|poster)\s*=\s*["']?\s*(https?:)?//|url\(\s*["']?\s*(https?:)?//|@import\s+["']?\s*(https?:)?//|<link[^>]+href\s*=\s*["']?\s*(https?:)?//)"#
 
     static func hasRemoteContent(_ html: String) -> Bool {
         html.range(of: remotePattern, options: .regularExpression) != nil
@@ -312,7 +312,7 @@ enum HTMLTools {
 
     /// Ersetzt cid:-Verweise durch eingebettete Bilder und setzt eine Content-Security-Policy
     static func prepare(_ html: String, attachments: [MailAttachment], allowRemote: Bool) -> String {
-        var h = html
+        var h = Privacy.strip(html).html   // Zählpixel und Tracker immer entfernen (2.47)
         for a in attachments {
             guard let cid = a.contentID, !cid.isEmpty else { continue }
             h = h.replacingOccurrences(of: "cid:\(cid)",
@@ -321,7 +321,7 @@ enum HTMLTools {
         let csp = allowRemote
             ? "default-src 'none'; img-src * data:; style-src * 'unsafe-inline'; font-src * data:; media-src *"
             : "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:"
-        return "<meta http-equiv=\"Content-Security-Policy\" content=\"\(csp)\">" + h
+        return "<meta http-equiv=\"Content-Security-Policy\" content=\"\(csp)\"><meta name=\"referrer\" content=\"no-referrer\">" + h
     }
 
     /// Echte Formatierung (Bild, Link, Fett, Farbe …) – sonst reicht die Text-Signatur

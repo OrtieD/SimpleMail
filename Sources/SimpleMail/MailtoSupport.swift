@@ -139,7 +139,7 @@ enum SafeLink {
 
     static func open(_ url: URL) {
         if isAllowed(url) {
-            NSWorkspace.shared.open(url)
+            NSWorkspace.shared.open(Privacy.cleanLink(url))   // ohne utm_* & Co. (2.47)
             return
         }
         let alert = NSAlert()

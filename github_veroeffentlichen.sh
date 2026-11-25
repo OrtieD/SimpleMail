@@ -4,7 +4,7 @@
 #   bash github_veroeffentlichen.sh              → Quellcode hochladen (erstes Mal: Repo anlegen)
 #   bash github_veroeffentlichen.sh --release    → zusätzlich Release mit Mac-App + Windows-Zip
 #
-# Windows-Zip für das Release: SimpleMail-Windows-x64.zip in den Ordner „Downloads“ legen.
+# Für das Release: Windows-Dateien in „Downloads“ oder als Teile in „Claude outputs/release-<Version>/“.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -66,7 +66,7 @@ git config user.email "${UID_GH}+${OWNER}@users.noreply.github.com"
 
 git add -A
 # Sicherheitsnetz: nichts Großes oder Privates hochladen
-BAD=$(git diff --cached --name-only | grep -Ei '\.(zip|dmg|exe|p12|pem|key|app/|log)$|^build/|^\.build/|^Claude outputs/|node_modules/|google\.json' || true)
+BAD=$(git diff --cached --name-only | grep -Ei '\.(zip|dmg|exe|p12|pem|key|app/|log)$|^build/|^\.build/|^Claude outputs/|^Cache/|^Daten/|node_modules/|google\.json' || true)
 [ -z "$BAD" ] || { echo "$BAD"; git reset -q; fail "Diese Dateien dürfen nicht hoch – Vorgang abgebrochen."; }
 BIG=$(git diff --cached --name-only -z | xargs -0 -I{} sh -c 'f="{}"; [ -f "$f" ] && [ $(stat -f%z "$f") -gt 5000000 ] && echo "$f"' || true)
 [ -z "$BIG" ] || { echo "$BIG"; git reset -q; fail "Dateien über 5 MB gefunden – Vorgang abgebrochen."; }
@@ -109,13 +109,25 @@ if [ "$RELEASE" = 1 ]; then
   else
     echo "Hinweis: /Applications/SimpleMail.app fehlt – Mac-App wird übersprungen."
   fi
-  WZ="$HOME/Downloads/SimpleMail-Windows-x64.zip"
-  if [ -f "$WZ" ]; then
-    cp "$WZ" "$OUT/SimpleMail-Windows-x64-$WIN.zip"
-    FILES+=("$OUT/SimpleMail-Windows-x64-$WIN.zip")
-  else
-    echo "Hinweis: $WZ fehlt – Windows-Zip wird übersprungen."
-  fi
+  # Windows: Setup-Zip und portable Zip – aus „Downloads“ oder in Teilen aus „Claude outputs/release-<Version>“
+  PARTS="Claude outputs/release-$WIN"
+  for NAME in "SimpleMail-Setup-$WIN.zip" "SimpleMail-Windows-portable.zip"; do
+    case "$NAME" in *portable.zip) DEST="SimpleMail-Windows-portable-$WIN.zip";; *) DEST="$NAME";; esac
+    if [ -f "$HOME/Downloads/$NAME" ]; then
+      cp "$HOME/Downloads/$NAME" "$OUT/$DEST"
+    elif ls "$PARTS/$NAME.part-"* >/dev/null 2>&1; then
+      cat "$PARTS/$NAME.part-"* > "$OUT/$DEST"
+      if [ -f "$PARTS/SHA256SUMS" ]; then
+        WANT=$(grep " $NAME\$" "$PARTS/SHA256SUMS" | cut -d' ' -f1)
+        HAVE=$(shasum -a 256 "$OUT/$DEST" | cut -d' ' -f1)
+        [ "$WANT" = "$HAVE" ] || fail "$NAME: Prüfsumme stimmt nicht – Teile unvollständig."
+      fi
+      echo "$NAME aus Teilen zusammengesetzt (Prüfsumme ok)."
+    else
+      echo "Hinweis: $NAME nicht gefunden – wird übersprungen."; continue
+    fi
+    FILES+=("$OUT/$DEST")
+  done
   [ ${#FILES[@]} -gt 0 ] || fail "Keine Programme gefunden – kein Release angelegt."
   if gh release view "$TAG" -R "$OWNER/$REPO" >/dev/null 2>&1; then
     gh release upload "$TAG" "${FILES[@]}" --clobber -R "$OWNER/$REPO"
@@ -123,7 +135,7 @@ if [ "$RELEASE" = 1 ]; then
     gh release create "$TAG" "${FILES[@]}" -R "$OWNER/$REPO" --target main \
       --title "SimpleMail Mac $MAC / Windows $WIN" \
       --notes "Mac: SimpleMail-Mac-$MAC.zip entpacken, App nach Programme ziehen, beim ersten Start Rechtsklick → Öffnen.
-Windows: SimpleMail-Windows-x64-$WIN.zip entpacken, SimpleMail.exe starten (SmartScreen: Weitere Informationen → Trotzdem ausführen)."
+Windows: SimpleMail-Setup-$WIN.zip entpacken und das Setup starten – oder SimpleMail-Windows-portable-$WIN.zip entpacken und SimpleMail.exe starten (SmartScreen: Weitere Informationen → Trotzdem ausführen)."
   fi
   rm -rf "$OUT"
   echo "Release: https://github.com/$OWNER/$REPO/releases/tag/$TAG"

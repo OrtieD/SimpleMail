@@ -2985,12 +2985,8 @@ function renderDetail(force = false) {
   html += inviteCard(m, body);
   html += meetingBanner(body);
   if (body.html) {
-    if (!allow && hasRemoteContent(body.html)) {
-      html += `<div class="banner">${icon('eye')}<span>Externe Bilder blockiert (Schutz vor Tracking)</span>
-        <button class="btn" data-act="images-once">Laden</button>
-        <button class="btn" data-act="images-always">Immer für diesen Absender</button></div>`;
-    }
-    html += '<iframe class="body-frame" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>';
+    html += trackerBanner(body, allow, 'main');
+    html += '<iframe class="body-frame" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe>';
   } else {
     html += `<pre class="body-text">${linkify(body.text || '')}</pre>`;
   }
@@ -3017,14 +3013,109 @@ function visibleAttachments(body) {
   return body.attachments.filter((a) => !a.calendar && !(a.inline && a.cid && html.includes(`cid:${a.cid}`)));
 }
 
-const REMOTE_RE = /((src|srcset|background)\s*=\s*["']?\s*(https?:)?\/\/|url\(\s*["']?\s*(https?:)?\/\/)/i;
+const REMOTE_RE = /((src|srcset|background|poster)\s*=\s*["']?\s*(https?:)?\/\/|url\(\s*["']?\s*(https?:)?\/\/|@import\s+["']?\s*(https?:)?\/\/|<link[^>]+href\s*=\s*["']?\s*(https?:)?\/\/)/i;
 const hasRemoteContent = (html) => REMOTE_RE.test(html);
 // Vertrauenswürdiger Absender nur ohne fehlgeschlagene Absenderprüfung (sonst evtl. gefälscht)
 const remoteAllowed = (m) => !S.settings.blockImages || (!m.authFailed && isTrusted(m.fromAddress.toLowerCase())) ||
   S.imagesAllowed.has(keyOf(m));
 
+// ------------------------------------------------------------------- Tracking-Schutz
+// Listen kommen aus security.js (gleich wie Mac Privacy.swift); bis sie da sind, wirkt die Pixel-Erkennung allein.
+const TRACK = { hosts: [], path: null };
+api.call('privacy:trackers').then((t) => { TRACK.hosts = t.hosts || []; TRACK.path = t.path ? new RegExp(t.path, 'i') : null; }).catch(() => {});
+
+const isRemoteUrl = (u) => /^\s*(https?:)?\/\//i.test(u || '');
+function trackerHost(u) {
+  try { return new URL(/^\s*\/\//.test(u) ? `https:${u.trim()}` : u.trim()).hostname.toLowerCase(); } catch { return ''; }
+}
+function isTrackerUrl(u) {
+  const host = trackerHost(u);
+  if (!host) return false;
+  if (TRACK.hosts.some((d) => host === d || host.endsWith(`.${d}`))) return true;
+  if (!TRACK.path) return false;
+  try { const x = new URL(/^\s*\/\//.test(u) ? `https:${u.trim()}` : u.trim()); return TRACK.path.test(x.pathname + x.search); } catch { return false; }
+}
+// Winzig oder unsichtbar: typisches Zählpixel
+function isPixelImg(img) {
+  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const st = (img.getAttribute('style') || '').toLowerCase().replace(/\s+/g, '');
+  const sw = st.match(/(?:^|;)(?:max-)?width:(\d+(?:\.\d+)?)px/);
+  const sh = st.match(/(?:^|;)(?:max-)?height:(\d+(?:\.\d+)?)px/);
+  const w = num(img.getAttribute('width')) ?? (sw ? num(sw[1]) : null);
+  const h = num(img.getAttribute('height')) ?? (sh ? num(sh[1]) : null);
+  if ((w !== null && w <= 3) && (h === null || h <= 3)) return true;
+  if ((h !== null && h <= 3) && w === null) return true;
+  return /display:none|visibility:hidden|opacity:0(?:[;.]|$)/.test(st);
+}
+
+/** Entfernt Zählpixel und Tracker-Bilder aus dem Mail-HTML. Ergebnis wird je Mail zwischengespeichert. */
+function scanTracking(body) {
+  if (body._privacy && body._privacy.gen === TRACK.hosts.length) return body._privacy;
+  const out = { gen: TRACK.hosts.length, html: body.html, count: 0, hosts: [] };
+  const hosts = new Set();
+  const hit = (u) => { out.count++; const h = trackerHost(u); if (h) hosts.add(h.replace(/^www\./, '')); };
+  try {
+    const doc = new DOMParser().parseFromString(body.html, 'text/html');
+    for (const img of [...doc.querySelectorAll('img, image, input[type=image]')]) {
+      const src = img.getAttribute('src') || img.getAttribute('href') || img.getAttribute('xlink:href') || '';
+      const set = img.getAttribute('srcset') || '';
+      if (!isRemoteUrl(src) && !/(https?:)?\/\//i.test(set)) continue;
+      if (isTrackerUrl(src) || isPixelImg(img)) { hit(src); img.remove(); }
+    }
+    // Hintergrundbilder und Stylesheets von Tracking-Diensten
+    for (const e of [...doc.querySelectorAll('[background]')]) {
+      const u = e.getAttribute('background');
+      if (isRemoteUrl(u) && isTrackerUrl(u)) { hit(u); e.removeAttribute('background'); }
+    }
+    const cssUrl = /url\(\s*["']?\s*((?:https?:)?\/\/[^"')\s]+)\s*["']?\s*\)/gi;
+    for (const e of [...doc.querySelectorAll('[style]')]) {
+      const st = e.getAttribute('style');
+      const ns = st.replace(cssUrl, (all, u) => (isTrackerUrl(u) ? (hit(u), 'none') : all));
+      if (ns !== st) e.setAttribute('style', ns);
+    }
+    for (const e of [...doc.querySelectorAll('style')]) {
+      const st = e.textContent;
+      const ns = st.replace(cssUrl, (all, u) => (isTrackerUrl(u) ? (hit(u), 'none') : all));
+      if (ns !== st) e.textContent = ns;
+    }
+    for (const e of [...doc.querySelectorAll('link[href]')]) {
+      const u = e.getAttribute('href');
+      if (isRemoteUrl(u) && isTrackerUrl(u)) { hit(u); e.remove(); }
+    }
+    // Hyperlink-Auditing und Vorab-Verbindungen abschalten
+    for (const e of [...doc.querySelectorAll('[ping]')]) e.removeAttribute('ping');
+    for (const e of [...doc.querySelectorAll('link[rel~=preconnect], link[rel~=dns-prefetch], link[rel~=prefetch], link[rel~=preload], meta[http-equiv=refresh]')]) e.remove();
+    out.html = doc.head.innerHTML + doc.body.innerHTML;
+  } catch { /* Original anzeigen – die CSP blockiert ohnehin externe Inhalte */ }
+  out.hosts = [...hosts].sort();
+  body._privacy = out;
+  return out;
+}
+
+const SHIELD_SVG = '<svg class="pv-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3z"/><path class="pv-mark" d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const HAND_SVG = '<svg class="pv-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3z"/><path class="pv-mark" d="M8 8l8 8M16 8l-8 8" fill="none" stroke-width="2.2" stroke-linecap="round"/></svg>';
+
+function trackerBanner(body, allow, where) {
+  const p = scanTracking(body);
+  const remote = hasRemoteContent(body.html);
+  const tr = p.count ? `${p.count} Tracker blockiert` : '';
+  const title = p.hosts.length ? ` title="${esc(p.hosts.join(', '))}"` : '';
+  const names = esc(p.hosts.slice(0, 3).join(', ') + (p.hosts.length > 3 ? ' …' : ''));
+  if (!allow && remote) {
+    return `<div class="banner privacy-banner warn">${HAND_SVG}<div class="pv-text"><b>Externe Inhalte blockiert${tr ? ` · <span class="tr-count"${title}>${tr}</span>` : ''}</b>
+      <div class="muted">${names ? `Zählpixel von ${names} entfernt. ` : ''}Der Absender erfährt nicht, ob und wo du die Mail öffnest.</div></div>
+      ${where === 'main' ? `<div class="pv-actions"><button class="btn" data-act="images-once">Bilder laden</button>
+      <button class="btn" data-act="images-always">Absender immer vertrauen</button></div>` : ''}</div>`;
+  }
+  if (tr) {
+    return `<div class="banner privacy-banner ok">${SHIELD_SVG}<div class="pv-text"><b class="tr-count"${title}>${tr}</b>
+      <div class="muted">${names ? `Entfernt: ${names}. Bilder werden ohne Cookies und Referrer geladen.` : 'Bilder werden ohne Zählpixel, Cookies und Referrer geladen.'}</div></div></div>`;
+  }
+  return '';
+}
+
 function prepareHtml(body, allow) {
-  let h = body.html;
+  let h = scanTracking(body).html;
   for (const a of body.attachments) {
     if (a.cid && a.dataUrl) h = h.split(`cid:${a.cid}`).join(a.dataUrl);
   }
@@ -3032,6 +3123,7 @@ function prepareHtml(body, allow) {
     ? "default-src 'none'; img-src https: http: data:; style-src https: http: 'unsafe-inline'; font-src https: http: data:; media-src https: http:"
     : "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:";
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">
+<meta name="referrer" content="no-referrer">
 <base target="_blank"><style>body{font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;margin:16px;word-wrap:break-word;color:#1b1b1b;background:#fff}img{max-width:100%;height:auto}::-webkit-scrollbar{width:14px;height:14px}::-webkit-scrollbar-thumb{background:#b9b9b9;border-radius:7px;border:3px solid transparent;background-clip:content-box}::-webkit-scrollbar-thumb:hover{background:#8f8f8f;border:3px solid transparent;background-clip:content-box}</style>
 </head><body>${h}</body></html>`;
 }
@@ -3043,7 +3135,7 @@ function printDocument(m, body) {
   const allow = remoteAllowed(m);
   let content;
   if (body.html) {
-    let h = body.html;
+    let h = scanTracking(body).html;
     for (const a of body.attachments) if (a.cid && a.dataUrl) h = h.split(`cid:${a.cid}`).join(a.dataUrl);
     content = h;
   } else {
@@ -3062,6 +3154,7 @@ function printDocument(m, body) {
   if (files.length) rows.push(['Anhänge:', files.map((a) => `${a.filename} (${fmtSize(a.size)})`).join(', ')]);
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
+<meta name="referrer" content="no-referrer">
 <title>${esc(m.subject || 'E-Mail')}</title>
 <style>
   body{font-family:'Segoe UI',system-ui,sans-serif;font-size:11pt;margin:0;color:#000;word-wrap:break-word;-webkit-print-color-adjust:exact}
@@ -3112,6 +3205,7 @@ async function openInWindow(m) {
     html: body.html ? prepareHtml(body, allow) : null,
     text: body.text || '',
     imagesBlocked: !!body.html && !allow && hasRemoteContent(body.html),
+    privacyBanner: body.html ? trackerBanner(body, allow, 'viewer') : '',
     warnings: body.warnings || [],
     isFlagged: !!m.isFlagged,
     attachments: visibleAttachments(body).map((a) => ({ key: a.key, filename: a.filename, size: fmtSize(a.size), risk: attRisk(a) })),
@@ -4328,10 +4422,11 @@ function openSettings({ welcome = false, tab = 'accounts', account = null } = {}
       <div></div><div style="display:flex;gap:6px;flex-wrap:wrap" id="p-open-find"></div>
       <label>PDF</label><div class="hint-text" style="margin:0;align-self:center">Standard-PDF-Reader von Windows</div>
       <div class="hint-text">Ein Klick auf den Anhang öffnet ihn mit diesem Programm. Ist es nicht installiert, wird die Standard-App genommen. Rechtsklick → „Öffnen mit …“ für ein anderes Programm. Die Wahl wird mit dem Mac synchronisiert.</div>
-      <h3>Externe Bilder</h3>
+      <h3>Datenschutz</h3>
       <label class="check" style="grid-column:1/-1"><input type="checkbox" id="p-block" style="width:auto" ${S.settings.blockImages ? 'checked' : ''}>
-        Externe Bilder in HTML-Mails blockieren</label>
-      <div class="hint-text">Verhindert Tracking-Pixel: Absender erfahren sonst, wann und wo du ihre Mail geöffnet hast. Eingebettete Bilder werden weiterhin angezeigt.</div>
+        Externe Inhalte in HTML-Mails blockieren (empfohlen)</label>
+      <div class="hint-text">Bilder, Schriften und Stile von fremden Servern werden erst nach „Bilder laden“ oder für vertraute Absender geladen. Eingebettete Bilder erscheinen immer.</div>
+      <div class="hint-text" style="grid-column:1/-1">Immer aktiv: Zählpixel und bekannte Tracking-Dienste werden entfernt, Bilder ohne Cookies, Referrer und Programmkennung geladen, Tracking-Parameter (utm_* usw.) beim Öffnen von Links gelöscht.</div>
       <h3>Spamfilter</h3>
       <label class="check" style="grid-column:1/-1"><input type="checkbox" id="p-spam" style="width:auto" ${spamFilter().enabled ? 'checked' : ''}>
         Erkannten Spam automatisch in den Spam-Ordner verschieben</label>

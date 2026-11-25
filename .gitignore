@@ -23,6 +23,8 @@ windows/test/fake-apps/log.txt
 
 # --- Arbeitsordner und Privates ---
 Claude outputs/
+Cache/
+Daten/
 *.p12
 *.pem
 *.key

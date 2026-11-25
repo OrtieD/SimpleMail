@@ -4,7 +4,7 @@ Schlanker E-Mail-Client im Stil von Spark – für **macOS** (Swift/SwiftUI, kei
 und **Windows** (Electron). Beide Versionen gleichen Einstellungen über das eigene Postfach ab.
 
 **Downloads:** fertige Programme gibt es unter [Releases](../../releases)
-(`SimpleMail-Windows-x64.zip`, `SimpleMail-Mac.zip`).
+(Windows: `SimpleMail-Setup-<Version>.zip` oder `SimpleMail-Windows-portable.zip`, Mac: `SimpleMail-Mac-<Version>.zip`).
 
 ## Funktionen
 - **Mehrere IMAP-Konten** mit Smart Inbox (Persönlich / Benachrichtigungen / Newsletter), Ordnerbaum je Konto,
@@ -12,13 +12,13 @@ und **Windows** (Electron). Beide Versionen gleichen Einstellungen über das eig
 - **Push per IMAP IDLE**, Offline-Ablage, Offline-Warteschlange
 - **Später erinnern** (Snooze) und **später senden**
 - **Suche** lokal beim Tippen, ↩ durchsucht alle Ordner aller Konten auf dem Server
-- **Regeln** (Absender/Empfänger/Betreff), Verschieben per Drag & Drop, Mehrfachauswahl
+- **Regeln** (Absender/Empfänger/Betreff; verschieben, weiterleiten, Kopie senden), Verschieben per Drag & Drop, Mehrfachauswahl
 - **Spam- und Phishing-Schutz**: SPF/DKIM/DMARC, Markenimitate, irreführende Links, Sperrliste,
-  automatischer Spamfilter, externe Bilder blockiert
+  automatischer Spamfilter, externe Bilder blockiert, **Tracking-Schutz** (Zählpixel, Tracking-Dienste, Tracking-Parameter in Links)
 - **Kalender**: Einladungen annehmen, Online-Meetings (Teams, Zoom, Meet, Webex, Jitsi …) erkennen und beitreten,
   Terminspalte (Mac: macOS-Kalender, Windows: Google-Kalender oder iCal-Link)
 - **Kontakte** mit vCard-Import/-Export, Daten aus Signaturen übernehmen
-- Signaturen (auch HTML), Textbausteine, formatierter Editor, Drucken/PDF, Anhänge mit Wunschprogramm öffnen
+- **Kontoansicht** je Konto, Signaturen (auch HTML), Textbausteine, formatierter Editor, Drucken/PDF, Anhänge mit Wunschprogramm öffnen
 - **Synchronisation Mac ↔ Windows** über den versteckten IMAP-Ordner „SimpleMail-Sync“
   (Konten ohne Passwörter, Signaturen, Textbausteine, Regeln, Kontakte, Einstellungen – verschlüsselt)
 
@@ -30,7 +30,7 @@ und **Windows** (Electron). Beide Versionen gleichen Einstellungen über das eig
 | `make_app.sh` | baut `build/SimpleMail.app` |
 | `setup_signing.sh` | legt einmalig ein lokales Signatur-Zertifikat an (optional) |
 | `windows/app/` | Windows-App (Electron: `main.js`, `preload.js`, `renderer/` …) |
-| `windows/test/` | Playwright-Tests mit lokalem IMAP/SMTP-Testserver, `pack.js` zum Verpacken |
+| `windows/test/` | Playwright-Tests mit lokalem IMAP/SMTP-Testserver, `pack.js` und `installer/` zum Verpacken |
 
 ## Mac bauen
 Voraussetzung: macOS 13+, Xcode Command Line Tools (`xcode-select --install`).
@@ -47,8 +47,9 @@ cd ../test      && npm install
 node server.js &          # Testserver: IMAP 1143 / SMTP 2525, Benutzer ortie@test.local / geheim (nur lokal)
 node run-all.js           # alle Tests (unter Linux: xvfb-run node run-all.js)
 node pack.js              # → windows/dist/SimpleMail-win32-x64
+bash installer/build.sh   # Installer + portable Zip (braucht makensis/nsis und zip)
 ```
-Der Ordner `SimpleMail-win32-x64` wird gezippt und als `SimpleMail-Windows-x64.zip` veröffentlicht.
+Ergebnis in `windows/dist/`: `SimpleMail-Setup-<Version>.exe` (für das Release gezippt) und `SimpleMail-Windows-portable.zip` – beides als Release-Download, nicht ins Repo.
 
 ## Hinweise
 - **Gmail, iCloud**: App-Passwort nötig (2-Faktor aktivieren). **WEB.DE / GMX**: IMAP im Webmailer freischalten.

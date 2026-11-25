@@ -263,6 +263,17 @@ button:disabled { opacity: .45; pointer-events: none; }
   padding: 8px 16px; background: var(--warn-bg); font-size: 13px; border-bottom: 1px solid var(--line);
 }
 .banner span { flex: 1; }
+.privacy-banner { padding: 9px 16px 9px 12px; border-left: 4px solid #e08a00; background: #fff1da; }
+.privacy-banner { flex-wrap: wrap; row-gap: 6px; }
+.privacy-banner .pv-text { flex: 1 1 220px; min-width: 0; }
+.privacy-banner .pv-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.privacy-banner .pv-text b { font-size: 13.5px; }
+.privacy-banner .muted { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.privacy-banner .pv-icon { width: 22px; height: 22px; flex: none; fill: #e08a00; }
+.privacy-banner .pv-mark { stroke: #fff; }
+.privacy-banner.ok { border-left-color: #1e9e4a; background: #e3f5e8; }
+.privacy-banner.ok .pv-icon { fill: #1e9e4a; }
+.privacy-banner .tr-count { cursor: help; }
 .body-frame { flex: 1; border: 0; width: 100%; background: #fff; }
 .body-text {
   flex: 1; overflow: auto; padding: 18px 22px; white-space: pre-wrap; user-select: text;
@@ -608,3 +619,8 @@ button.small, .btn.small, .primary.small { padding: 3px 10px; font-size: 12.5px;
 @media (prefers-color-scheme: dark) { .g-banner.expired { background: #4a1d21; color: #ffd7da; } }
 .cal-warn { margin: 8px; padding: 8px 10px; border-radius: 8px; background: var(--warn-bg); border-left: 4px solid #ffcc00; font-size: 13px; line-height: 1.45; }
 .cal-warn .btn { margin-top: 6px; }
+@media (prefers-color-scheme: dark) {
+  .privacy-banner { background: #3a2a10; }
+  .privacy-banner.ok { background: #14321e; }
+  .privacy-banner .pv-mark { stroke: #1b1b1b; }
+}

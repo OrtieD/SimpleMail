@@ -104,10 +104,12 @@ final class PrintJob: NSObject, WKNavigationDelegate {
     func start() {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
+        PrivacyRules.configure(config)
         let info = NSPrintInfo.shared
         let width = info.paperSize.width - info.leftMargin - info.rightMargin
         let frame = NSRect(x: 0, y: 0, width: max(width, 400), height: 800)
         webView = WKWebView(frame: frame, configuration: config)
+        webView.customUserAgent = Privacy.userAgent
         webView.navigationDelegate = self
         // WebKit druckt zuverlässig nur, wenn die View in einem Fenster hängt – das Fenster bleibt unsichtbar
         window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)

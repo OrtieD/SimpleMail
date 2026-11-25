@@ -1,2 +1,2 @@
 #!/bin/sh
-echo "libreoffice $1" >> "/root/w/env/test/fake-apps/log.txt"
+echo "libreoffice $1" >> "/home/user/w/winapp-test/fake-apps/log.txt"

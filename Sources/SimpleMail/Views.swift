@@ -1107,9 +1107,7 @@ struct MessageDetailView: View {
                     .padding(.top, 12)
             }
             if let html = mb.html {
-                if !store.remoteImagesAllowed(message) && store.hasRemoteContent(html, for: message.key) {
-                    imageBanner
-                }
+                privacyBanner(html)
                 HTMLView(html: store.preparedHTML(html, for: message, body: mb),
                          onLink: { url in store.openLink(url, accountID: message.accountID) })
             } else {
@@ -1152,19 +1150,54 @@ struct MessageDetailView: View {
         }
     }
 
-    private var imageBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "eye.slash")
-            Text("Externe Bilder blockiert (Schutz vor Tracking)")
-                .font(.callout)
-            Spacer()
-            Button("Laden") { store.allowImagesOnce(message) }
-            Button("Immer für diesen Absender") { store.trustSender(message) }
+    /// Hinweis „Externe Inhalte blockiert“ bzw. „X Tracker blockiert“ (2.47, deutlicher seit 2.48)
+    @ViewBuilder
+    private func privacyBanner(_ html: String) -> some View {
+        let info = store.trackerInfo(html, for: message.key)
+        let blocked = !store.remoteImagesAllowed(message) && store.hasRemoteContent(html, for: message.key)
+        let tr = info.count > 0 ? (info.count == 1 ? "1 Tracker blockiert" : "\(info.count) Tracker blockiert") : ""
+        let names = info.hosts.prefix(3).joined(separator: ", ") + (info.hosts.count > 3 ? " …" : "")
+        if blocked {
+            HStack(spacing: 10) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.title3)
+                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tr.isEmpty ? "Externe Inhalte blockiert" : "Externe Inhalte blockiert · " + tr)
+                        .font(.callout.weight(.semibold))
+                    Text(names.isEmpty ? "Der Absender erfährt nicht, ob und wo du die Mail öffnest."
+                                       : "Zählpixel von \(names) entfernt. Der Absender erfährt nicht, ob und wo du die Mail öffnest.")
+                        .font(.caption).ink(.secondary)
+                        .help(info.hosts.joined(separator: ", "))
+                }
+                Spacer()
+                Button("Bilder laden") { store.allowImagesOnce(message) }
+                Button("Absender immer vertrauen") { store.trustSender(message) }
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Color.orange.opacity(0.16))
+            .overlay(Rectangle().fill(Color.orange).frame(width: 4), alignment: .leading)
+        } else if !tr.isEmpty {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.title3)
+                    .foregroundColor(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tr).font(.callout.weight(.semibold))
+                    Text(names.isEmpty ? "Bilder werden ohne Zählpixel, Cookies und Referrer geladen."
+                                       : "Entfernt: \(names). Bilder werden ohne Cookies und Referrer geladen.")
+                        .font(.caption).ink(.secondary)
+                        .help(info.hosts.joined(separator: ", "))
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Color.green.opacity(0.16))
+            .overlay(Rectangle().fill(Color.green).frame(width: 4), alignment: .leading)
         }
-        .controlSize(.small)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.yellow.opacity(0.15))
     }
 }
 
@@ -1230,7 +1263,9 @@ struct HTMLView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
+        PrivacyRules.configure(config)   // keine Cookies/Speicher, Tracker-Adressen gesperrt (2.47)
         let view = WKWebView(frame: .zero, configuration: config)
+        view.customUserAgent = Privacy.userAgent
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         context.coordinator.onLink = onLink

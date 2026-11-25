@@ -27,6 +27,21 @@ Neu in 2.1
   Erinnerungen und Bild-Freigaben – über den versteckten Ordner „SimpleMail-Sync“ im eigenen Postfach.
   Auf allen Geräten unter Einstellungen → Offline & Sync dasselbe Konto wählen.
 
+Neu in 3.2.43
+- Tracking-Hinweis deutlicher: grüner Balken mit Schild „X Tracker blockiert“ und den entfernten Diensten,
+  orangefarbener Balken, solange externe Inhalte gesperrt sind.
+
+Neu in 3.2.42 – Schutz vor Tracking (wie „Datenschutz für Mail“ bei Apple Mail)
+- Zählpixel und bekannte Tracking-Dienste (Mailchimp, SendGrid, HubSpot, Brevo, Klaviyo, Amazon SES u. a.)
+  werden aus jeder Mail entfernt – auch nach „Bilder laden“ und bei vertrauten Absendern.
+- Externe Inhalte (Bilder, Schriften, Stile) bleiben gesperrt, bis du „Bilder laden“ oder
+  „Absender immer vertrauen“ wählst. Vertraute Absender werden mit dem Mac abgeglichen.
+- Hinweis in der Mail: „X Tracker blockiert“ (Maus über die Zahl zeigt die Dienste).
+- Bilder werden ohne Cookies, ohne Referrer und ohne Programmkennung geladen.
+- Beim Öffnen von Links werden Tracking-Parameter (utm_*, fbclid, gclid, mc_eid …) entfernt.
+- Nicht möglich: die IP-Adresse verbergen. Apple leitet Bilder dafür über eigene Relay-Server;
+  SimpleMail hat keinen solchen Dienst. Wer das will, kann ein VPN nutzen.
+
 Neu in 3.2.41
 - Konto oben in der Seitenleiste wählen zeigt jetzt immer den ganzen Posteingang dieses Kontos (Smart Inbox).
   Vorher blieb eine gefilterte Ansicht wie „Benachrichtigungen“, „Ungelesen“ oder „Markiert“ stehen – dadurch

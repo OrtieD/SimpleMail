@@ -1,6 +1,6 @@
 'use strict';
 // SimpleMail für Windows – Hauptprozess: Konten, IMAP/SMTP, Push (IDLE), Speicher, Dateien
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification, safeStorage, nativeImage, powerMonitor, Menu, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, safeStorage, nativeImage, powerMonitor, Menu, net, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -1817,7 +1817,43 @@ function openMailto(url) {
 /** Link aus einer Mail: mailto → eigener Editor, http(s) → Standardbrowser */
 function openLink(url) {
   if (/^mailto:/i.test(url)) { if (!openMailto(url)) shell.openExternal(url); }
-  else if (/^https?:/i.test(url)) shell.openExternal(url);
+  else if (/^https?:/i.test(url)) shell.openExternal(security.cleanLinkUrl(url));   // ohne utm_* & Co.
+}
+
+// ---------------------------------------------------------------- Tracking-Schutz
+// Bilder, Stile und Schriften aus Mails (Leseansicht, Fenster, Druck) laden ohne Cookies und ohne Referrer
+// mit allgemeiner Browser-Kennung; bekannte Tracking-Adressen werden gar nicht erst abgerufen.
+// net.fetch der App selbst (Kalender, Google) hat keine webContents und bleibt unberührt.
+const MAIL_RESOURCES = new Set(['image', 'stylesheet', 'font', 'media', 'object', 'ping', 'cspReport', 'other']);
+const GENERIC_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+let trackersStopped = 0;
+function isMailResource(d) {
+  return !!d.webContentsId && MAIL_RESOURCES.has(d.resourceType) && /^https?:/i.test(d.url);
+}
+function setupPrivacy(ses) {
+  const filter = { urls: ['http://*/*', 'https://*/*'] };
+  ses.webRequest.onBeforeRequest(filter, (d, cb) => {
+    if (isMailResource(d) && (d.resourceType === 'ping' || d.resourceType === 'cspReport' || security.isTrackerUrl(d.url))) {
+      trackersStopped++;
+      return cb({ cancel: true });
+    }
+    cb({});
+  });
+  ses.webRequest.onBeforeSendHeaders(filter, (d, cb) => {
+    if (!isMailResource(d)) return cb({ requestHeaders: d.requestHeaders });
+    const h = {};
+    for (const [k, v] of Object.entries(d.requestHeaders)) {
+      if (/^(cookie|referer|origin)$/i.test(k)) continue;
+      h[k] = /^user-agent$/i.test(k) ? GENERIC_UA : v;
+    }
+    cb({ requestHeaders: h });
+  });
+  ses.webRequest.onHeadersReceived(filter, (d, cb) => {
+    if (!isMailResource(d) || !d.responseHeaders) return cb({});
+    const h = {};
+    for (const [k, v] of Object.entries(d.responseHeaders)) if (!/^set-cookie2?$/i.test(k)) h[k] = v;
+    cb({ responseHeaders: h });
+  });
 }
 
 function bringToFront(w) {
@@ -2907,6 +2943,8 @@ function registerIPC() {
   // Oberfläche bereit → mailto vom Kaltstart abholen
   handle('app:takePendingMailto', () => { const u = pendingMailto; pendingMailto = null; return u; });
 
+  handle('privacy:trackers', () => ({ hosts: security.TRACKER_HOSTS, path: security.TRACKER_PATH.source, stopped: trackersStopped }));
+
   handle('app:openExternal', (url) => {
     openLink(String(url || ''));
     return true;
@@ -3210,6 +3248,7 @@ if (!gotLock) {
     outbox = readJSON('outbox.json', []);
     try { migrateGoogleConnectedAt(); } catch { /* ohne Zeitpunkt weiter */ }
     registerIPC();
+    setupPrivacy(session.defaultSession);
     createWindow();
     for (const acc of accounts) startSession(acc);
     setInterval(processOutbox, 30 * 1000);

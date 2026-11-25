@@ -265,6 +265,7 @@ final class MailStore: ObservableObject {
     private var countCacheTime = Date.distantPast
     private var htmlCache: [MessageKey: PreparedHTML] = [:]
     private var remoteCheckCache: [MessageKey: Bool] = [:]
+    private var trackerCache: [MessageKey: TrackerInfo] = [:]
     private var inviteCache: [MessageKey: InviteCacheEntry] = [:]
     private var linkedTextCache: [MessageKey: LinkedTextEntry] = [:]
     private var contactsTask: Task<Void, Never>?
@@ -2428,6 +2429,16 @@ final class MailStore: ObservableObject {
         return out
     }
 
+    /// Entfernte Zählpixel/Tracker einer Mail (für den Hinweis „X Tracker blockiert“, je Mail gemerkt)
+    func trackerInfo(_ html: String, for key: MessageKey) -> TrackerInfo {
+        if let hit = trackerCache[key], hit.length == html.utf8.count { return hit }
+        if trackerCache.count > 200 { trackerCache.removeAll() }
+        let r = Privacy.strip(html)
+        let info = TrackerInfo(length: html.utf8.count, count: r.count, hosts: r.hosts)
+        trackerCache[key] = info
+        return info
+    }
+
     /// Enthält die Mail externe Inhalte? (Ergebnis je Mail gemerkt – Regex über das ganze HTML)
     func hasRemoteContent(_ html: String, for key: MessageKey) -> Bool {
         if let v = remoteCheckCache[key] { return v }
@@ -3383,4 +3394,11 @@ struct PendingOp: Codable, Equatable {
     static func save(_ list: [PendingOp]) {
         if let data = try? JSONEncoder().encode(list) { UserDefaults.standard.set(data, forKey: "pendingOps") }
     }
+}
+
+/// Ergebnis des Tracking-Schutzes je Mail (2.47)
+struct TrackerInfo {
+    let length: Int
+    let count: Int
+    let hosts: [String]
 }

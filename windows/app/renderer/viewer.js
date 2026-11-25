@@ -57,11 +57,12 @@ function render() {
     html += `<div class="banner danger-banner">⚠<div><b>Vorsicht – möglicher Betrugsversuch (Phishing)</b>
       ${m.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div></div>`;
   }
-  if (m.imagesBlocked) {
+  if (m.privacyBanner) html += m.privacyBanner;   // „X Tracker blockiert“ (aus dem Hauptfenster, schon maskiert)
+  else if (m.imagesBlocked) {
     html += `<div class="banner">${icon('eye')}<span>Externe Bilder blockiert (im Hauptfenster freigeben)</span></div>`;
   }
   html += m.html
-    ? '<iframe class="body-frame" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>'
+    ? '<iframe class="body-frame" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe>'
     : `<pre class="body-text">${linkify(m.text || '')}</pre>`;
   if (m.attachments.length) {
     html += `<div class="attachments"><div class="chips">${m.attachments.map((a) =>
