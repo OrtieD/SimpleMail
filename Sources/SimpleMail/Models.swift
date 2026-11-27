@@ -157,6 +157,8 @@ enum SidebarItem: Hashable {
     case spam
     /// 2.42: Gesendet- bzw. Papierkorb-Ordner aller Konten zusammen
     case sent, trash
+    /// 2.49: Entwürfe aller Konten zusammen
+    case drafts
     case category(MailCategory)
     case folder(UUID, String)
 
@@ -180,6 +182,7 @@ enum SidebarItem: Hashable {
         case .spam: return .junk
         case .sent: return .sent
         case .trash: return .trash
+        case .drafts: return .drafts
         default: return nil
         }
     }
@@ -337,6 +340,8 @@ struct Draft: Identifiable {
     var attachments: [URL] = []
     var inReplyTo: String? = nil
     var references: String? = nil
+    /// 2.49: zuletzt gespeicherter Stand im Entwürfe-Ordner (wird beim Senden bzw. erneuten Speichern gelöscht)
+    var draftRef: DraftRef? = nil
 }
 
 enum MailError: LocalizedError {

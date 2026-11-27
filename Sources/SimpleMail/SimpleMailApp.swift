@@ -31,6 +31,12 @@ struct SimpleMailApp: App {
                 Button("Neue E-Mail") { store.composeDraft = store.newDraft() }
                     .keyboardShortcut("n")
                     .disabled(store.accounts.isEmpty)
+                // 2.49: speichert die gerade verfasste E-Mail im Ordner „Entwürfe“
+                Button("Als Entwurf speichern") {
+                    NotificationCenter.default.post(name: .simpleMailSaveDraft, object: nil)
+                }
+                .keyboardShortcut("s")
+                .disabled(store.composeDraft == nil)
                 Button("Neuer Termin / Online-Meeting …") { calendar.newMeetingOpen = true }
                     .keyboardShortcut("m", modifiers: [.command, .shift])
                 Button("E-Mails abrufen") { Task { await store.refresh() } }

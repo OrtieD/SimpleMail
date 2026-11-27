@@ -27,6 +27,14 @@ Neu in 2.1
   Erinnerungen und Bild-Freigaben – über den versteckten Ordner „SimpleMail-Sync“ im eigenen Postfach.
   Auf allen Geräten unter Einstellungen → Offline & Sync dasselbe Konto wählen.
 
+Neu in 3.2.44
+- Als Entwurf speichern: im Verfassen-Fenster „Entwurf speichern“, Strg+S oder Datei → Als Entwurf speichern.
+  Der Entwurf liegt im Ordner „Entwürfe“ des Kontos (fehlt er, wird „Drafts“ angelegt) und ist damit auch
+  im Webmailer und auf dem Mac sichtbar.
+- Schließen mit Änderungen (Verwerfen, Esc, Klick daneben) fragt nach: Speichern / Abbrechen / Verwerfen.
+- Neuer Eintrag „Entwürfe“ in der Seitenleiste (alle Konten). Doppelklick, Enter oder „Entwurf bearbeiten“
+  öffnet den Entwurf zum Weiterschreiben. Beim Senden (auch „Später senden“) wird der Entwurf gelöscht.
+
 Neu in 3.2.43
 - Tracking-Hinweis deutlicher: grüner Balken mit Schild „X Tracker blockiert“ und den entfernten Diensten,
   orangefarbener Balken, solange externe Inhalte gesperrt sind.

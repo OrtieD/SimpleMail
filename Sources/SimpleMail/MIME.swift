@@ -330,7 +330,8 @@ enum MessageBuilder {
         var h: [String] = []
         let name = account.displayName.isEmpty ? "" : encodeWord(account.displayName) + " "
         h.append("From: \(name)<\(account.email)>")
-        h.append("To: \(to.joined(separator: ", "))")
+        // 2.49: Entwürfe dürfen noch ohne Empfänger sein
+        if !to.isEmpty { h.append("To: \(to.joined(separator: ", "))") }
         if !cc.isEmpty { h.append("Cc: \(cc.joined(separator: ", "))") }
         h.append("Subject: \(encodeWord(d.subject))")
         h.append("Date: \(df.string(from: Date()))")

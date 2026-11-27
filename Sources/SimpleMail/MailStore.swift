@@ -598,8 +598,8 @@ final class MailStore: ObservableObject {
         switch sidebar ?? .smart {
         case .folder:
             list = folderMessages
-        case .spam, .sent, .trash:
-            // Spam/Gesendet/Papierkorb aller Konten (bzw. des gewählten Kontos)
+        case .spam, .sent, .trash, .drafts:
+            // Spam/Gesendet/Papierkorb/Entwürfe aller Konten (bzw. des gewählten Kontos)
             let onlyAccount = activeFilter
             list = folderMessages.filter { onlyAccount == nil || $0.accountID == onlyAccount }
         case .snoozed:
@@ -1854,6 +1854,7 @@ final class MailStore: ObservableObject {
         let (data, recipients) = try MessageBuilder.build(draft, account: acc)
         guard !recipients.isEmpty else { throw MailError.invalidResponse("Kein gültiger Empfänger angegeben.") }
         try await deliver(data, to: recipients, account: acc)
+        if let ref = draft.draftRef { await deleteDraft(ref) }
     }
 
     func schedule(_ draft: Draft, at date: Date) throws {
@@ -1863,6 +1864,7 @@ final class MailStore: ObservableObject {
         scheduled.append(ScheduledMail(accountID: acc.id, sendAt: date, subject: draft.subject,
                                        toDisplay: draft.to, recipients: recipients, data: data))
         scheduled.sort { $0.sendAt < $1.sendAt }
+        if let ref = draft.draftRef { Task { await self.deleteDraft(ref) } }
     }
 
     func cancelScheduled(_ item: ScheduledMail) {
@@ -2555,6 +2557,8 @@ final class MailStore: ObservableObject {
 
     /// Anfangsinhalt des formatierten Editors aus dem Text-Entwurf
     func editorHTML(for d: Draft) -> String {
+        // 2.49: wieder geöffneter Entwurf bringt seinen formatierten Inhalt mit
+        if let h = d.bodyHtml, !h.isEmpty { return h }
         let block = signatureBlock(account(d.accountID))
         var before = d.body
         var after = ""

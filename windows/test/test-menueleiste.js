@@ -108,7 +108,7 @@ const item = (page, sel, label) => page.locator(`${sel} .mi`, { hasText: label }
   await page.keyboard.press('F10'); await sleep(200);
   check('F10 öffnet Datei', (await page.$eval('#menubar .mb-top.open', (e) => e.textContent)) === 'Datei');
   await page.keyboard.press('ArrowDown'); await sleep(100);
-  check('Pfeil runter markiert Eintrag 2', (await page.$eval('#mbDrop .mi.active', (e) => e.textContent)).startsWith('Neuer Termin'));
+  check('Pfeil runter markiert Eintrag 2', (await page.$eval('#mbDrop .mi.active', (e) => e.textContent)).startsWith('Als Entwurf speichern'));
   await page.keyboard.press('Escape'); await sleep(100);
   await page.keyboard.press('Alt'); await sleep(200);
   check('Alt allein öffnet Menüleiste', await dropOpen(page));

@@ -214,6 +214,8 @@ struct SidebarView: View {
                 row("Markiert", "star", .flagged, 0)
                 row("Später", "clock", .snoozed, store.snoozedCount)
                 row("Geplant", "paperplane.circle", .scheduled, store.scheduled.count)
+                // 2.49: Entwürfe aller Konten
+                row("Entwürfe", "doc", .drafts, 0)
                 // 2.42: gemeinsame Ordner aller Konten (nehmen gezogene Mails an)
                 row("Gesendet", "paperplane", .sent, 0)
                 row("Papierkorb", "trash", .trash, 0)
@@ -557,7 +559,11 @@ struct MessageListView: View {
         if keys.count > 1 {
             BulkMenuItems()
         } else if let k = keys.first, let m = store.message(for: k) {
-            Button("In eigenem Fenster öffnen") { openWindow(value: m) }
+            if store.isDraft(m) {
+                Button("Entwurf bearbeiten") { Task { await store.openDraft(m) } }
+            } else {
+                Button("In eigenem Fenster öffnen") { openWindow(value: m) }
+            }
             Divider()
             singleMenu(m)
         }
@@ -566,7 +572,13 @@ struct MessageListView: View {
     /// Doppelklick / ↩: ausgewählte Mails in eigenen Fenstern öffnen
     private func openInWindows(_ keys: Set<MessageKey>) {
         for k in keys.prefix(10) {
-            if let m = store.message(for: k) { openWindow(value: m) }
+            guard let m = store.message(for: k) else { continue }
+            // 2.49: Entwurf öffnet den Editor zum Weiterschreiben
+            if store.isDraft(m) {
+                Task { await store.openDraft(m) }
+                return
+            }
+            openWindow(value: m)
         }
     }
 
@@ -594,9 +606,9 @@ struct MessageListView: View {
                    lines: store.listLines,
                    preview: store.previews[m.key],
                    accountColor: store.accounts.count > 1 ? store.accountColor(m.accountID) : nil,
-                   senderColor: store.isSentFolder(m) ? nil : store.contactColor(m.fromAddress),
+                   senderColor: store.isSentFolder(m) || store.isDraft(m) ? nil : store.contactColor(m.fromAddress),
                    folderLabel: store.searchResults != nil ? store.folderLabel(m) : nil,
-                   showRecipients: store.isSentFolder(m))
+                   showRecipients: store.isSentFolder(m) || store.isDraft(m))
             // Unveränderte Zeilen nicht neu zeichnen (jede Änderung am Store wertet sonst alle Zeilen neu aus)
             .equatable()
             .tag(m.key)
@@ -1001,6 +1013,12 @@ struct MessageDetailView: View {
         }
         .toolbar {
             ToolbarItemGroup {
+                if store.isDraft(message) {
+                    Button { Task { await store.openDraft(message) } } label: {
+                        Label("Entwurf bearbeiten", systemImage: "square.and.pencil")
+                    }
+                    .help("Entwurf weiterschreiben (Doppelklick / ↩)")
+                }
                 Button { store.composeDraft = store.replyDraft(message, all: false) } label: {
                     Label("Antworten", systemImage: "arrowshape.turn.up.left")
                 }
@@ -1329,18 +1347,45 @@ final class ComposeModel: ObservableObject {
     @Published var sendError: String? = nil
     @Published var showSchedule = false
     @Published var scheduleDate: Date = Date().addingTimeInterval(3600)
+    /// 2.49: Entwurf speichern
+    @Published var isSaving = false
+    @Published var savedAt: Date? = nil
     var lastAccountID: UUID?
     let editor = EditorBridge()
     var initialHTML: String? = nil
+    /// Stand beim Öffnen bzw. letzten Speichern (Felder) und Editor-Inhalt nach dem Laden
+    var savedFields = ""
+    var savedEditor: String? = nil
 
     init(draft: Draft) {
         self.draft = draft
         lastAccountID = draft.accountID
+        savedFields = Self.fieldState(draft)
         editor.onChange = { [weak self] html, text in
             guard let self else { return }
+            // erste Meldung = Inhalt direkt nach dem Laden
+            if self.savedEditor == nil { self.savedEditor = html }
             self.draft.bodyHtml = html
             self.draft.body = text
         }
+    }
+
+    static func fieldState(_ d: Draft) -> String {
+        [d.accountID?.uuidString ?? "", d.to, d.cc, d.subject, d.attachments.map(\.path).joined(separator: "|")]
+            .joined(separator: "\u{1}")
+    }
+
+    /// Geändert seit dem Öffnen bzw. letzten Speichern?
+    var isDirty: Bool {
+        if Self.fieldState(draft) != savedFields { return true }
+        if let base = savedEditor, let now = draft.bodyHtml, base != now { return true }
+        return false
+    }
+
+    func markSaved(_ d: Draft) {
+        savedFields = Self.fieldState(d)
+        if let h = d.bodyHtml { savedEditor = h }
+        savedAt = Date()
     }
 }
 
@@ -1394,6 +1439,9 @@ struct ComposeView: View {
             let files = urls.filter { $0.isFileURL && !m.draft.attachments.contains($0) }
             m.draft.attachments.append(contentsOf: files)
             return !files.isEmpty
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .simpleMailSaveDraft)) { _ in
+            saveDraft()
         }
         .onChange(of: m.draft.accountID) { newValue in
             if newValue != m.lastAccountID {
@@ -1518,7 +1566,7 @@ struct ComposeView: View {
 
     private var bottomBar: some View {
         HStack {
-            Button("Abbrechen", role: .cancel) { dismiss() }
+            Button("Abbrechen", role: .cancel) { requestClose() }
                 .keyboardShortcut(.cancelAction)
             Button { addAttachments() } label: {
                 Label("Anhang", systemImage: "paperclip")
@@ -1538,8 +1586,16 @@ struct ComposeView: View {
                 Label("Textbaustein", systemImage: "text.badge.plus")
             }
             .fixedSize()
+            Button { saveDraft() } label: {
+                Label("Entwurf speichern", systemImage: "doc")
+            }
+            .help("Als Entwurf speichern (⌘S)")
+            .disabled(m.isSaving || store.accounts.isEmpty)
             Spacer()
-            if m.isSending { ProgressView().controlSize(.small) }
+            if let t = m.savedAt, !m.isSaving {
+                Text("Entwurf gespeichert \(Formatters.time.string(from: t))").font(.caption).ink(.secondary)
+            }
+            if m.isSending || m.isSaving { ProgressView().controlSize(.small) }
             Menu {
                 ForEach(TimeOptions.sendLater()) { o in
                     Button("\(o.title) – \(Formatters.weekdayTime.string(from: o.date))") {
@@ -1647,6 +1703,47 @@ struct ComposeView: View {
             dismiss()
         } catch {
             m.sendError = error.localizedDescription
+        }
+    }
+
+    /// 2.49: Als Entwurf speichern (Knopf, ⌘S); Fenster bleibt offen, außer beim Schließen mit „Speichern“
+    func saveDraft(thenClose: Bool = false) {
+        let model = m
+        guard !model.isSaving, !model.isSending else { return }
+        model.isSaving = true
+        model.sendError = nil
+        let draft = model.draft
+        Task { @MainActor in
+            do {
+                let ref = try await store.saveDraft(draft)
+                model.draft.draftRef = ref
+                model.markSaved(draft)
+                model.isSaving = false
+                if thenClose { dismiss() }
+            } catch {
+                model.sendError = "Entwurf nicht gespeichert: \(error.localizedDescription)"
+                model.isSaving = false
+            }
+        }
+    }
+
+    /// Schließen: bei Änderungen nachfragen (Speichern / Abbrechen / Verwerfen)
+    func requestClose() {
+        guard m.isDirty else { dismiss(); return }
+        let alert = NSAlert()
+        alert.messageText = "Als Entwurf speichern?"
+        alert.informativeText = m.draft.draftRef == nil
+            ? "Die E-Mail wurde noch nicht gesendet. Im Ordner „Entwürfe“ speichern, um sie später weiterzuschreiben?"
+            : "Der Entwurf wurde geändert. Sollen die Änderungen gespeichert werden?"
+        alert.addButton(withTitle: "Speichern")
+        alert.addButton(withTitle: "Abbrechen")
+        alert.addButton(withTitle: m.draft.draftRef == nil ? "Verwerfen" : "Änderungen verwerfen")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
+        let answer = alert.runModal()
+        if answer == .alertFirstButtonReturn {
+            saveDraft(thenClose: true)
+        } else if answer == .alertThirdButtonReturn {
+            dismiss()
         }
     }
 }

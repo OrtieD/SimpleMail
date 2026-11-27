@@ -373,7 +373,7 @@ class Session {
     });
     const pick = (role) => (folders.find((f) => f.role === role && f.selectable && f.depth === 0)
       || folders.find((f) => f.role === role && f.selectable) || {}).path;
-    this.special = { archive: pick('archive'), trash: pick('trash'), sent: pick('sent'), junk: pick('junk') };
+    this.special = { archive: pick('archive'), trash: pick('trash'), sent: pick('sent'), junk: pick('junk'), drafts: pick('drafts') };
     this.folders = folders;
   }
 
@@ -593,7 +593,7 @@ function composedHtml(html) {
     + `<div style="font-family:'Segoe UI',Arial,sans-serif;font-size:14px">${body}</div></body></html>`;
 }
 
-async function buildMessage(draft, acc) {
+async function buildMessage(draft, acc, { asDraft = false } = {}) {
   const files = [];
   let total = 0;
   for (const a of draft.attachments || []) {
@@ -610,7 +610,7 @@ async function buildMessage(draft, acc) {
   }
   const mail = {
     from: acc.displayName ? { name: acc.displayName, address: acc.email } : acc.email,
-    to: draft.to,
+    to: draft.to || undefined,
     cc: draft.cc || undefined,
     subject: draft.subject || '',
     text: draft.body || '',
@@ -626,7 +626,7 @@ async function buildMessage(draft, acc) {
   };
   const node = new MailComposer(mail).compile();
   const envelope = node.getEnvelope();
-  if (!envelope.to || !envelope.to.length) throw new Error('Kein gültiger Empfänger angegeben.');
+  if (!asDraft && (!envelope.to || !envelope.to.length)) throw new Error('Kein gültiger Empfänger angegeben.');
   const raw = await node.build();
   return { raw, envelope };
 }
@@ -676,6 +676,93 @@ async function storeSentCopy(acc, raw) {
     await c.append(s.special.sent, raw, ['\\Seen']);
     return s.special.sent;
   });
+}
+
+// ---------------------------------------------------------------- Entwürfe (3.2.44)
+
+/** Entwürfe-Ordner des Kontos; fehlt er, wird „Drafts“ angelegt */
+async function draftsFolder(s, c) {
+  if (!s.special.drafts) await s.loadFolderList(c);
+  if (s.special.drafts) return { folder: s.special.drafts, created: false };
+  try { await c.mailboxCreate('Drafts'); } catch { /* evtl. schon vorhanden */ }
+  await s.loadFolderList(c);
+  if (!s.special.drafts) throw new Error('Kein Entwürfe-Ordner vorhanden und keiner anlegbar.');
+  return { folder: s.special.drafts, created: true };
+}
+
+/** Entwurf als Mail (Flag \Draft) im Entwürfe-Ordner ablegen; der vorige Stand wird danach gelöscht */
+async function saveDraft(draft) {
+  const acc = accounts.find((a) => a.id === draft.accountId) || accounts[0];
+  if (!acc) throw new Error('Kein Konto eingerichtet.');
+  const { raw } = await buildMessage(draft, acc, { asDraft: true });
+  const head = raw.toString('binary').split('\r\n\r\n')[0];
+  const messageId = ((/^Message-ID:\s*(.*)$/im.exec(head) || [])[1] || '').trim();
+  const s = sessionFor(acc.id);
+  const res = await s.run(async (c) => {
+    const { folder, created } = await draftsFolder(s, c);
+    const r = await c.append(folder, raw, ['\\Draft', '\\Seen']);
+    let uid = r && r.uid ? r.uid : null;
+    if (!uid && messageId) {
+      // Server ohne UIDPLUS: per Message-ID suchen
+      const lock = await c.getMailboxLock(folder);
+      try {
+        const found = await c.search({ header: { 'message-id': messageId } }, { uid: true });
+        if (found && found.length) uid = found[found.length - 1];
+      } finally { lock.release(); }
+    }
+    return { accountId: acc.id, folder, uid, messageId, created };
+  });
+  const old = draft.draftRef;
+  if (old && !(old.accountId === res.accountId && old.folder === res.folder && old.uid === res.uid)) {
+    await deleteDraft(old).catch(() => {});
+  }
+  if (res.created) send('folders-changed', acc.id);
+  return res;
+}
+
+/** Entwurf endgültig löschen (nicht in den Papierkorb) */
+async function deleteDraft(ref) {
+  if (!ref || !ref.accountId || !ref.folder) return false;
+  const s = sessions.get(ref.accountId);
+  if (!s) return false;
+  return s.withMailbox(ref.folder, async (c) => {
+    let uids = ref.uid ? [ref.uid] : [];
+    if (!uids.length && ref.messageId) uids = (await c.search({ header: { 'message-id': ref.messageId } }, { uid: true })) || [];
+    if (!uids.length) return false;
+    await c.messageDelete(uids.join(','), { uid: true });
+    return true;
+  });
+}
+
+/** Entwurf zum Weiterbearbeiten laden: Kopf, Text/HTML, Anhänge (Bilder im Text als data:-URL) */
+async function loadDraft(accountId, folder, uid) {
+  const s = sessionFor(accountId);
+  const source = await s.withMailbox(folder, async (c) => {
+    const m = await c.fetchOne(String(uid), { source: true }, { uid: true });
+    if (!m || !m.source) throw new Error('Entwurf wurde nicht gefunden (evtl. bereits gesendet oder gelöscht).');
+    return m.source;
+  });
+  const parsed = await simpleParser(source, { skipTextToHtml: true });
+  const addrText = (v) => (!v ? '' : (Array.isArray(v) ? v.map((x) => x.text).join(', ') : v.text || ''));
+  let html = typeof parsed.html === 'string' ? parsed.html : null;
+  const attachments = [];
+  for (const a of parsed.attachments || []) {
+    const isImg = /^image\//i.test(a.contentType || '');
+    if (a.cid && isImg && html && html.includes(`cid:${a.cid}`)) {
+      html = html.split(`cid:${a.cid}`).join(`data:${a.contentType};base64,${a.content.toString('base64')}`);
+      continue;
+    }
+    if (/text\/calendar|application\/ics/i.test(a.contentType || '')) continue;
+    const key = crypto.randomUUID();
+    const name = cleanFileName(a.filename || a.cid || 'Anhang');
+    attachmentCache.set(key, { filename: name, contentType: a.contentType, content: a.content });
+    attachments.push({ key, name, size: a.size || (a.content ? a.content.length : 0) });
+  }
+  const refs = parsed.references ? (Array.isArray(parsed.references) ? parsed.references.join(' ') : parsed.references) : '';
+  return {
+    to: addrText(parsed.to), cc: addrText(parsed.cc), subject: parsed.subject || '',
+    text: parsed.text || '', html, inReplyTo: parsed.inReplyTo || '', references: refs, attachments,
+  };
 }
 
 /** Versandprotokoll versand.log (nur lokal, ohne Inhalt): Zeit, Konto, Empfänger, Message-ID, Antwort des Servers */
@@ -2478,8 +2565,13 @@ function registerIPC() {
     if (!acc) throw new Error('Kein Konto eingerichtet.');
     const { raw, envelope } = await buildMessage(draft, acc);
     await deliver(acc, raw, envelope);
+    if (draft.draftRef) await deleteDraft(draft.draftRef).catch(() => {});
     return true;
   });
+
+  handle('mail:saveDraft', (draft) => saveDraft(draft));
+  handle('mail:loadDraft', (accountId, folder, uid) => loadDraft(accountId, folder, uid));
+  handle('mail:deleteDraft', (ref) => deleteDraft(ref));
 
   handle('mail:schedule', async (draft, sendAt) => {
     const acc = accounts.find((a) => a.id === draft.accountId) || accounts[0];
@@ -2490,6 +2582,7 @@ function registerIPC() {
     outbox.sort((a, b) => new Date(a.sendAt) - new Date(b.sendAt));
     writeJSON('outbox.json', outbox);
     send('outbox-changed', outbox.map(publicOutbox));
+    if (draft.draftRef) await deleteDraft(draft.draftRef).catch(() => {});
     return true;
   });
 
@@ -2991,7 +3084,7 @@ function showShortcuts() {
       'Strg+N  Neue E-Mail', 'F5  Abrufen', 'Strg+F  Suchen (Enter = alle Ordner)',
       'Strg+P  Drucken', 'Enter / Doppelklick  E-Mail in eigenem Fenster', 'Strg+R  Antworten', 'Strg+Umschalt+R  Allen antworten', 'Strg+Umschalt+F  Weiterleiten',
       'E  Archivieren', 'Entf  Löschen', 'S  Markieren', 'Strg+U  Gelesen/ungelesen',
-      '↑ / ↓  Vorherige/nächste E-Mail', 'Strg+Enter  Senden (im Verfassen-Fenster)', 'Strg+,  Einstellungen',
+      '↑ / ↓  Vorherige/nächste E-Mail', 'Strg+Enter  Senden (im Verfassen-Fenster)', 'Strg+S  Als Entwurf speichern', 'Strg+,  Einstellungen',
     ].join('\n'),
   });
 }
@@ -3000,6 +3093,7 @@ function buildMenu() {
   return Menu.buildFromTemplate([
     { label: '&Datei', submenu: [
       cmd('Neue E-Mail', 'compose', 'Ctrl+N'),
+      cmd('Als Entwurf speichern', 'save-draft', 'Ctrl+S'),
       cmd('Neuer Termin / Online-Meeting …', 'meeting', 'Ctrl+Shift+M'),
       cmd('Google Kalender neu anmelden', 'google-reconnect'),
       cmd('E-Mails abrufen', 'refresh', 'F5'),

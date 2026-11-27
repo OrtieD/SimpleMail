@@ -74,6 +74,7 @@ struct SpecialFolders {
     var trash: String?
     var sent: String?
     var junk: String? = nil
+    var drafts: String? = nil
 }
 
 final class IMAPClient {
@@ -321,7 +322,9 @@ final class IMAPClient {
         }
     }
 
-    func append(_ message: Data, to folder: String, flags: String = "\\Seen") async throws {
+    /// Legt eine Nachricht im Ordner ab. Liefert die neue UID, wenn der Server sie meldet (UIDPLUS: APPENDUID)
+    @discardableResult
+    func append(_ message: Data, to folder: String, flags: String = "\\Seen") async throws -> UInt32? {
         let tag = nextTag()
         try await conn.send("\(tag) APPEND \(Self.quote(folder)) (\(flags)) {\(message.count)}\r\n")
         while true {
@@ -330,7 +333,24 @@ final class IMAPClient {
             if r.text.hasPrefix(tag + " ") { throw MailError.server(r.text) }
         }
         try await conn.send(message + Data([13, 10]))
-        _ = try await collect(until: tag)
+        while true {
+            let r = try await readResponse()
+            guard r.text.hasPrefix(tag + " ") else { continue }
+            let status = String(r.text.dropFirst(tag.count + 1))
+            guard status.hasPrefix("OK") else { throw MailError.server(status) }
+            if let u = Pattern.first(#"APPENDUID \d+ (\d+)"#, in: status) { return UInt32(u) }
+            return nil
+        }
+    }
+
+    /// 2.49: UIDs im gewählten Ordner mit dieser Message-ID (Entwurf wiederfinden, wenn der Server keine UID meldet)
+    func searchMessageID(_ messageID: String) async throws -> [UInt32] {
+        let rs = try await command("UID SEARCH HEADER Message-ID \(Self.quote(messageID))")
+        var uids: [UInt32] = []
+        for r in rs where r.text.hasPrefix("* SEARCH") {
+            uids += r.text.dropFirst(8).split(separator: " ").compactMap { UInt32($0) }
+        }
+        return uids
     }
 
     /// Alle Ordner (LIST), sortiert: Posteingang, Spezialordner, Rest alphabetisch
@@ -385,7 +405,8 @@ final class IMAPClient {
             all.first { $0.role == role && $0.selectable && $0.depth == 0 }?.path
                 ?? all.first { $0.role == role && $0.selectable }?.path
         }
-        return SpecialFolders(archive: first(.archive), trash: first(.trash), sent: first(.sent), junk: first(.junk))
+        return SpecialFolders(archive: first(.archive), trash: first(.trash), sent: first(.sent), junk: first(.junk),
+                              drafts: first(.drafts))
     }
 
     func capabilities() async throws -> String {

@@ -442,7 +442,7 @@ function visibleMessages() {
   const v = S.view;
   switch (v.type) {
     case 'folder': list = S.folderMsgs; break;
-    case 'spam': case 'sent': case 'trash': {
+    case 'spam': case 'sent': case 'trash': case 'drafts': {
       // Spam/Gesendet/Papierkorb aller Konten (bzw. des gewählten Kontos), 3.2.36: auch Gesendet + Papierkorb
       const f = accountFilter();
       list = S.folderMsgs.filter((m) => !f || m.accountId === f);
@@ -708,7 +708,7 @@ function roleFolderOf(accId, role) {
 const junkFolderOf = (accId) => roleFolderOf(accId, 'junk');
 
 // 3.2.36: gemeinsame Ordner über alle Konten – Ansicht → Ordnerrolle
-const ROLE_VIEWS = { spam: 'junk', sent: 'sent', trash: 'trash' };
+const ROLE_VIEWS = { spam: 'junk', sent: 'sent', trash: 'trash', drafts: 'drafts' };   // 3.2.44: Entwürfe
 const isRoleView = (v) => !!(v && ROLE_VIEWS[v.type]);
 /** Ordner der gemeinsamen Ansicht: [{ acc, path }] für alle (bzw. das gefilterte) Konten */
 function roleTargets(type) {
@@ -1910,6 +1910,8 @@ function renderSidebar() {
   html += sideItem('Markiert', 'star', { type: 'flagged' }, 0, sameView(v, { type: 'flagged' }));
   html += sideItem('Später', 'clock', { type: 'snoozed' }, snoozedCount, sameView(v, { type: 'snoozed' }));
   html += sideItem('Geplant', 'send', { type: 'scheduled' }, S.outbox.length, sameView(v, { type: 'scheduled' }));
+  // 3.2.44: Entwürfe aller Konten
+  html += sideItem('Entwürfe', 'drafts', { type: 'drafts' }, 0, sameView(v, { type: 'drafts' }));
   // 3.2.36: gemeinsame Ordner aller Konten (nehmen gezogene Mails an)
   html += sideItem('Gesendet', 'sent', { type: 'sent' }, 0, sameView(v, { type: 'sent' })).replace('class="side-item', 'data-drop-role="sent" class="side-item');
   html += sideItem('Papierkorb', 'trash', { type: 'trash' }, 0, sameView(v, { type: 'trash' })).replace('class="side-item', 'data-drop-role="trash" class="side-item');
@@ -1934,7 +1936,7 @@ function renderSidebar() {
         continue;
       }
       const view = { type: 'folder', acc: a.id, path: f.path };
-      const count = ['trash', 'junk', 'sent'].includes(f.role) ? 0 : f.unread;
+      const count = ['trash', 'junk', 'sent', 'drafts'].includes(f.role) ? 0 : f.unread;
       let item = sideItem(f.name, ROLE_ICON[f.role], view, count, sameView(v, view))
         .replace('class="side-item', `${pad} data-drop-acc="${esc(a.id)}" data-drop-path="${esc(f.path)}" class="side-item`);
       // 3.2.38: eigene Schriftfarbe (Rechtsklick → Schriftfarbe …)
@@ -2749,7 +2751,9 @@ function rowHtml(m) {
   if (multiAcc) meta.push(`<span class="acc-tag"><span class="acc-dot" style="background:${accCol}"></span>${esc(accountLabel(m.accountId))}</span>`);
   const subjectText = esc(m.subject || '(Kein Betreff)');
   // 3.2.36: in Gesendet die Empfänger statt des eigenen Namens
-  const who = folderRole(m) === 'sent' && m.to ? `An: ${recipientNames(m.to)}` : sender(m);
+  const role = folderRole(m);
+  const who = role === 'drafts' ? `Entwurf${m.to ? ` an ${recipientNames(m.to)}` : ''}`
+    : role === 'sent' && m.to ? `An: ${recipientNames(m.to)}` : sender(m);
   const isSel = S.multi.size > 1 ? S.multi.has(k) : S.selected === k;
   return `<div class="row lines-${lines}${m.isRead ? '' : ' unread'}${isSel ? ' selected' : ''}" data-act="select" data-key="${esc(k)}" draggable="true">
     ${accCol ? `<span class="acc-stripe" style="background:${accCol}" title="${esc(accountLabel(m.accountId))}"></span>` : ''}
@@ -2822,9 +2826,9 @@ function renderList() {
     if (S.view.type === 'folder') {
       const f = (S.folders[S.view.acc] || []).find((x) => x.path === S.view.path);
       if (f) parts.push({ k: 'g:ordner', h: `<div class="group">${esc(f.name)} · ${esc(findAccount(S.view.acc)?.email || '')}</div>` });
-    } else if (S.view.type === 'sent' || S.view.type === 'trash') {
+    } else if (S.view.type === 'sent' || S.view.type === 'trash' || S.view.type === 'drafts') {
       const f = accountFilter();
-      const title = S.view.type === 'sent' ? 'Gesendet' : 'Papierkorb';
+      const title = { sent: 'Gesendet', trash: 'Papierkorb', drafts: 'Entwürfe' }[S.view.type];
       parts.push({ k: `g:${S.view.type}`, h: `<div class="group">${title} · ${f ? esc(findAccount(f)?.email || '') : 'alle Konten'}</div>` });
     }
     rows(vis);
@@ -2934,6 +2938,7 @@ function renderDetail(force = false) {
 
   const acc = findAccount(m.accountId);
   let html = `<div class="detail-bar">
+    ${isDraftMsg(m) ? `<button class="primary" data-act="edit-draft" title="Entwurf weiterschreiben (Enter / Doppelklick)">${icon('drafts')} Entwurf bearbeiten</button><span class="sep"></span>` : ''}
     <button class="btn" data-act="reply" title="Antworten (Strg+R)">${icon('reply')} Antworten</button>
     <button class="btn" data-act="reply-all" title="Allen antworten (Strg+Umschalt+R)">${icon('replyAll')}</button>
     <button class="btn" data-act="forward" title="Weiterleiten (Strg+Umschalt+F)">${icon('forward')}</button>
@@ -3185,6 +3190,7 @@ async function printMessage(m) {
 // =================================================================== Eigenes Fenster (Doppelklick)
 
 async function openInWindow(m) {
+  if (isDraftMsg(m)) { openDraft(m); return; }
   const k = keyOf(m);
   if (!S.bodies[k]) await loadBody(m);
   const body = S.bodies[k];
@@ -3677,6 +3683,49 @@ async function askPendingServerChanges(list) {
 
 // ---- Verfassen
 let composeOpen = false;
+let composeSaveHook = null;   // „Als Entwurf speichern“ (Menü/Strg+S) für das offene Verfassen-Fenster
+
+/** Entwurf aus dem Entwürfe-Ordner zum Weiterschreiben öffnen (3.2.44) */
+const isDraftMsg = (m) => !!m && folderRole(m) === 'drafts';
+async function openDraft(m) {
+  if (composeOpen) { toast('Bitte zuerst die offene E-Mail senden, speichern oder verwerfen.'); return; }
+  let r;
+  try { r = await api.call('mail:loadDraft', m.accountId, m.folder, m.uid); } catch (e) { showError(e.message); return; }
+  openCompose({
+    accountId: m.accountId, to: r.to, cc: r.cc, subject: r.subject,
+    html: r.html ? draftEditorHtml(r.html) : null, body: r.text,
+    inReplyTo: r.inReplyTo || undefined, references: r.references || undefined,
+    attachments: r.attachments,
+    draftRef: { accountId: m.accountId, folder: m.folder, uid: m.uid },
+  });
+}
+/** HTML eines gespeicherten Entwurfs → Editor-Inhalt (Hülle der Mail entfernen, Signatur wieder erkennen) */
+function draftEditorHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  for (const n of doc.querySelectorAll('script, style, meta, title')) n.remove();
+  let root = doc.body;
+  const only = root.children.length === 1 && root.firstElementChild;
+  if (only && only.tagName === 'DIV' && /font-family/i.test(only.getAttribute('style') || '')) root = only;
+  for (const n of root.querySelectorAll('.simplemail-signature')) { n.classList.remove('simplemail-signature'); n.classList.add('sm-sig'); }
+  for (const n of root.querySelectorAll('*')) for (const a of [...n.attributes]) if (/^on/i.test(a.name)) n.removeAttribute(a.name);
+  return root.innerHTML.trim() || '<div><br></div>';
+}
+
+/** Dialog mit mehreren Knöpfen → id des gewählten Knopfs ('cancel' bei Esc) */
+function choiceDialog({ title, text, buttons, focus }) {
+  return new Promise((resolve) => {
+    const { el, close } = openOverlay(`<div class="dialog" style="width:480px">
+      <div class="dialog-head">${esc(title)}</div>
+      <div style="padding:16px 18px;line-height:1.5">${esc(text)}</div>
+      <div class="dialog-foot">${buttons.map((b, i) => `${i === 1 ? '<span class="grow"></span>' : ''}<button class="${b.cls}" data-x="${esc(b.id)}">${esc(b.label)}</button>`).join('')}</div></div>`, { closable: false });
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; close(); resolve(v); };
+    el.addEventListener('click', (e) => { const x = e.target.closest('[data-x]'); if (x) finish(x.dataset.x); });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish('cancel'); } });
+    const f = $(`[data-x="${focus}"]`, el);
+    if (f) f.focus();
+  });
+}
 
 /** Signatur für den formatierten Editor (inkl. Trenner „-- “) */
 function editorSignature(acc) {
@@ -3761,12 +3810,13 @@ function openCompose(draft) {
       <button class="btn" data-x="cancel">Verwerfen</button>
       <button class="btn" data-x="attach" title="Dateien anhängen (oder ins Fenster ziehen)">${icon('clip')} Anhang</button>
       <button class="btn" data-x="snippets">${icon('snippet')} Textbaustein</button>
+      <button class="btn" data-x="save-draft" title="Als Entwurf speichern (Strg+S)">${icon('drafts')} Entwurf speichern</button>
       <span class="grow"></span>
       <span class="spinner hidden" id="c-spin"></span>
       <button class="btn" data-x="later">${icon('clock')} Später senden</button>
       <button class="primary" data-x="send" title="Senden (Strg+Enter)">${icon('send')} Senden</button>
-    </div></div>`);
-  const close = () => { composeOpen = false; document.removeEventListener('selectionchange', onSel); rawClose(); };
+    </div></div>`, { closable: false });
+  const close = () => { composeOpen = false; composeSaveHook = null; document.removeEventListener('selectionchange', onSel); rawClose(); };
   const dlg = $('.compose', el);
   const bodyEl = $('#c-body', el);
   bodyEl.innerHTML = editorHTML(d);
@@ -3828,6 +3878,50 @@ function openCompose(draft) {
     d.body = bodyEl.innerText.replace(/\u00a0/g, ' ');
     d.html = bodyEl.innerHTML;
   };
+  // 3.2.44: Entwürfe – Stand beim Öffnen/Speichern merken, beim Schließen nachfragen
+  const stateOf = () => JSON.stringify([d.accountId, d.to, d.cc, d.subject, d.html, d.attachments.map((a) => a.key || a.path)]);
+  sync();
+  let savedState = stateOf();
+  let saving = null;
+  const isDirty = () => { sync(); return stateOf() !== savedState; };
+  const doSaveDraft = async ({ quiet = false } = {}) => {
+    sync();
+    if (saving) return saving;
+    $('#c-spin', el).classList.remove('hidden');
+    setErr('');
+    saving = (async () => {
+      try {
+        const ref = await api.call('mail:saveDraft', d);
+        d.draftRef = { accountId: ref.accountId, folder: ref.folder, uid: ref.uid, messageId: ref.messageId };
+        savedState = stateOf();
+        if (!quiet) toast('Als Entwurf gespeichert');
+        if (S.view.type === 'drafts' || (S.view.type === 'folder' && S.view.path === ref.folder)) refresh();
+        return true;
+      } catch (e) {
+        setErr(`Entwurf nicht gespeichert: ${e.message}`);
+        return false;
+      } finally {
+        saving = null;
+        $('#c-spin', el).classList.add('hidden');
+      }
+    })();
+    return saving;
+  };
+  composeSaveHook = () => doSaveDraft();
+  const requestClose = async () => {
+    if (!isDirty()) { close(); return; }
+    const choice = await choiceDialog({
+      title: 'Als Entwurf speichern?',
+      text: d.draftRef ? 'Der Entwurf wurde geändert. Sollen die Änderungen gespeichert werden?'
+        : 'Die E-Mail wurde noch nicht gesendet. Im Ordner „Entwürfe“ speichern, um sie später weiterzuschreiben?',
+      buttons: [{ id: 'discard', label: d.draftRef ? 'Änderungen verwerfen' : 'Verwerfen', cls: 'btn danger' },
+        { id: 'cancel', label: 'Abbrechen', cls: 'btn' }, { id: 'save', label: 'Speichern', cls: 'primary' }],
+      focus: 'save',
+    });
+    if (choice === 'discard') close();
+    else if (choice === 'save' && await doSaveDraft()) close();
+  };
+  el.addEventListener('mousedown', (e) => { if (e.target === el) requestClose(); });
   const setErr = (msg) => { const e = $('#c-err', el); e.textContent = msg || ''; e.classList.toggle('hidden', !msg); };
   const renderFiles = () => {
     const box = $('#c-files', el);
@@ -3932,13 +4026,16 @@ function openCompose(draft) {
 
   el.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); doSend(); }
+    else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); doSaveDraft(); }
+    else if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); requestClose(); }
   });
   el.addEventListener('click', async (e) => {
     const x = e.target.closest('[data-x]');
     if (!x) return;
     const r = x.getBoundingClientRect();
     switch (x.dataset.x) {
-      case 'cancel': close(); break;
+      case 'cancel': requestClose(); break;
+      case 'save-draft': doSaveDraft(); break;
       case 'send': doSend(); break;
       case 'fmt': fmt(x.dataset.cmd); break;
       case 'c-link': {
@@ -4934,6 +5031,7 @@ document.addEventListener('click', (e) => {
       if (m) showMenu(r.left - 180, r.bottom + 4, snoozeMenuItems(m));
       break;
     }
+    case 'edit-draft': if (m) openDraft(m); break;
     case 'reply': if (m) openCompose(replyDraft(m, false)); break;
     case 'reply-all': if (m) openCompose(replyDraft(m, true)); break;
     case 'forward': if (m) openCompose(forwardDraft(m)); break;
@@ -5157,6 +5255,7 @@ function handleMenu(command) {
   }
   switch (command) {
     case 'compose': openCompose(newDraft()); break;
+    case 'save-draft': if (composeSaveHook) composeSaveHook(); else toast('Kein Verfassen-Fenster offen.'); break;
     case 'meeting': if (!$('#modal-root').children.length) openEventDialog(null); break;
     case 'google-reconnect':
       if (S.google.clientId) googleReconnect(null); else openSettings({ tab: 'calendar' });
