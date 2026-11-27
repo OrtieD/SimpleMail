@@ -424,9 +424,7 @@ extension MailStore {
 
     /// Ordner einer Rolle (Spam, Gesendet, Papierkorb) eines Kontos – zuerst oberste Ebene
     func rolePath(_ accountID: UUID, _ role: FolderRole) -> String? {
-        let list = folders[accountID] ?? []
-        return list.first { $0.role == role && $0.selectable && $0.depth == 0 }?.path
-            ?? list.first { $0.role == role && $0.selectable }?.path
+        MailFolder.best(folders[accountID] ?? [], role: role)
     }
 
     func markSpam(_ m: MailMessage, block: String?) async {

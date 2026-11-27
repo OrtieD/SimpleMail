@@ -214,6 +214,13 @@ const FETCH_QUERY = {
 
 const ROLE_ORDER = { inbox: 0, drafts: 1, sent: 2, archive: 3, junk: 4, trash: 5, other: 6 };
 
+/** 3.2.45: Ordner einer Rolle wählen – vom Server markierte zuerst (WEB.DE: „Entwürfe“ (\\Drafts) neben „Drafts“), dann oberste Ebene */
+function bestRoleFolder(folders, role) {
+  const c = folders.filter((f) => f.role === role && f.selectable);
+  return (c.find((f) => f.specialUse && f.depth === 0) || c.find((f) => f.specialUse)
+    || c.find((f) => f.depth === 0) || c[0] || {}).path;
+}
+
 function folderRole(f) {
   if (f.path.toUpperCase() === 'INBOX') return 'inbox';
   const su = (f.specialUse || '').toLowerCase();
@@ -363,6 +370,8 @@ class Session {
       allMail: f.specialUse === '\\All' || f.flags.has('\\All'),
       virtual: f.flags.has('\\Important') || f.flags.has('\\Flagged') || f.specialUse === '\\Flagged' || f.specialUse === '\\Important',
       delimiter: f.delimiter || '/',
+      // 3.2.45: Rolle vom Server markiert (RFC 6154) – hat Vorrang vor gleichnamigen Ordnern
+      specialUse: ['\\drafts', '\\sent', '\\junk', '\\trash', '\\archive', '\\all'].includes(String(f.specialUse || '').toLowerCase()),
       unread: 0,
     }));
     folders.sort((a, b) => {
@@ -371,8 +380,7 @@ class Session {
       if (ra !== rb) return ra - rb;
       return a.path.localeCompare(b.path, 'de', { numeric: true, sensitivity: 'base' });
     });
-    const pick = (role) => (folders.find((f) => f.role === role && f.selectable && f.depth === 0)
-      || folders.find((f) => f.role === role && f.selectable) || {}).path;
+    const pick = (role) => bestRoleFolder(folders, role);
     this.special = { archive: pick('archive'), trash: pick('trash'), sent: pick('sent'), junk: pick('junk'), drafts: pick('drafts') };
     this.folders = folders;
   }

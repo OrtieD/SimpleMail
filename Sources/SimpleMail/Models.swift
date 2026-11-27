@@ -203,7 +203,17 @@ struct MailFolder: Identifiable, Hashable, Codable {
     /// Gmail: „Alle Nachrichten“ (\\All) bzw. virtuelle Ordner „Wichtig“/„Markiert“ (keine eigenen Mails)
     var isAllMail: Bool = false
     var isVirtual: Bool = false
+    /// 2.50: Rolle kommt vom Server (RFC 6154: \\Drafts, \\Sent …) statt nur aus dem Namen
+    var isSpecialUse: Bool? = nil
     var id: String { path }
+
+    /// 2.50: Ordner einer Rolle wählen – vom Server markierte Ordner zuerst (WEB.DE hat z. B. „Entwürfe“ (\\Drafts)
+    /// und zusätzlich „Drafts“; vorher gewann alphabetisch „Drafts“), dann oberste Ebene
+    static func best(_ list: [MailFolder], role: FolderRole) -> String? {
+        let c = list.filter { $0.role == role && $0.selectable }
+        return (c.first { $0.isSpecialUse == true && $0.depth == 0 } ?? c.first { $0.isSpecialUse == true }
+            ?? c.first { $0.depth == 0 } ?? c.first)?.path
+    }
 
     var icon: String {
         switch role {

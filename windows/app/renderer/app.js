@@ -703,7 +703,9 @@ async function prefetchBodies() {
 /** Ordner einer Rolle (junk/sent/trash) eines Kontos (wie im Hauptprozess: zuerst oberste Ebene) */
 function roleFolderOf(accId, role) {
   const list = (S.folders[accId] || []).filter((f) => f.role === role && f.selectable);
-  return ((list.find((f) => f.depth === 0) || list[0]) || {}).path || null;
+  // 3.2.45: vom Server markierter Ordner zuerst (wie bestRoleFolder im Hauptprozess)
+  return ((list.find((f) => f.specialUse && f.depth === 0) || list.find((f) => f.specialUse)
+    || list.find((f) => f.depth === 0) || list[0]) || {}).path || null;
 }
 const junkFolderOf = (accId) => roleFolderOf(accId, 'junk');
 

@@ -378,7 +378,8 @@ final class IMAPClient {
                 selectable: !attrs.contains("\\noselect") && !attrs.contains("\\nonexistent"),
                 role: MailFolder.role(path: path, leaf: leaf, attributes: attrs),
                 isAllMail: attrs.contains("\\all"),
-                isVirtual: attrs.contains("\\important") || attrs.contains("\\flagged")))
+                isVirtual: attrs.contains("\\important") || attrs.contains("\\flagged"),
+                isSpecialUse: ["\\drafts", "\\sent", "\\junk", "\\trash", "\\archive", "\\all"].contains { attrs.contains($0) }))
         }
         // Hierarchie bleibt erhalten, weil nach vollem Pfad sortiert wird
         return result.sorted { a, b in
@@ -401,10 +402,7 @@ final class IMAPClient {
     /// Erkennt Archiv-, Papierkorb- und Gesendet-Ordner (RFC 6154 + Namens-Fallback)
     func detectSpecialFolders() async throws -> SpecialFolders {
         let all = try await listFolders()
-        func first(_ role: FolderRole) -> String? {
-            all.first { $0.role == role && $0.selectable && $0.depth == 0 }?.path
-                ?? all.first { $0.role == role && $0.selectable }?.path
-        }
+        func first(_ role: FolderRole) -> String? { MailFolder.best(all, role: role) }
         return SpecialFolders(archive: first(.archive), trash: first(.trash), sent: first(.sent), junk: first(.junk),
                               drafts: first(.drafts))
     }

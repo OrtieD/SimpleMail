@@ -27,6 +27,10 @@ Neu in 2.1
   Erinnerungen und Bild-Freigaben – über den versteckten Ordner „SimpleMail-Sync“ im eigenen Postfach.
   Auf allen Geräten unter Einstellungen → Offline & Sync dasselbe Konto wählen.
 
+Neu in 3.2.45
+- Gibt es zwei Ordner derselben Art (z. B. bei WEB.DE „Entwürfe“ und zusätzlich „Drafts“), nimmt SimpleMail
+  jetzt den, den der Server selbst als Entwürfe-/Gesendet-/Papierkorb-Ordner kennzeichnet (vorher den alphabetisch ersten).
+
 Neu in 3.2.44
 - Als Entwurf speichern: im Verfassen-Fenster „Entwurf speichern“, Strg+S oder Datei → Als Entwurf speichern.
   Der Entwurf liegt im Ordner „Entwürfe“ des Kontos (fehlt er, wird „Drafts“ angelegt) und ist damit auch
